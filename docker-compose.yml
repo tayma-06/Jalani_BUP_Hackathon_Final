@@ -63,6 +63,7 @@ services:
       GIT_SHA: ${GIT_SHA:-dev}
       ML_SERVICE_URL: ${ML_SERVICE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      ALERT_WEBHOOK_TOKEN: ${ALERT_WEBHOOK_TOKEN:-demo-alert-webhook-token}
     ports: ['127.0.0.1:8080:8080']
     depends_on:
       db: {condition: service_healthy}
@@ -84,13 +85,30 @@ services:
       backend: {condition: service_started}
     logging: *logging
 
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
+    environment:
+      # Must equal the backend's ALERT_WEBHOOK_TOKEN or every delivery is rejected.
+      ALERT_WEBHOOK_TOKEN: ${ALERT_WEBHOOK_TOKEN:-demo-alert-webhook-token}
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./observability/alertmanager-entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - alertmanager-data:/alertmanager
+    ports: ['127.0.0.1:9093:9093']
+    depends_on: [backend]
+    logging: *logging
+
   prometheus:
     image: prom/prometheus:v3.5.0
     restart: unless-stopped
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
     ports: ['127.0.0.1:9090:9090']
+    depends_on: [alertmanager]
     logging: *logging
 
   grafana:
@@ -101,6 +119,11 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: 'true'
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/service-health.json
+      # Offline-safe demo: no plugin downloads or update checks.
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -110,6 +133,8 @@ services:
 
 volumes:
   pgdata:
+  prometheus-data:
+  alertmanager-data:
 
 secrets:
   # Only needed behind TLS-intercepting antivirus/proxies. See README "Troubleshooting".

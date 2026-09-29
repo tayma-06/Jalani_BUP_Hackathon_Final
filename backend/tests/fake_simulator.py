@@ -49,6 +49,24 @@ class FakeSimulator:
         self.lose_response = False
         self.reject_code = None
         self.moving = False
+        self.history_ticks = 0
+
+    def record_demand(self, ticks=1):
+        """Append `ticks` of per-station demand rows, newest last, for history-merge tests."""
+        base = self.data["demand-history"]
+        for tick in range(self.data["instance"]["tick"] - ticks + 1, self.data["instance"]["tick"] + 1):
+            for index, station in enumerate(self.data["stations"]):
+                for fuel_index, fuel in enumerate(FUELS):
+                    if any(row["tick"] == tick and row["station_id"] == station["id"] for row in base):
+                        continue
+                    demand = 100 + index * 10 + fuel_index * 5 + tick
+                    base.append({"id": tick * 100 + index * 10 + fuel_index, "station_id": station["id"],
+                                 "fuel_type": fuel, "tick": tick,
+                                 "sim_time": (datetime(2026, 1, 1, tzinfo=timezone.utc)
+                                              + timedelta(minutes=tick * 15)).isoformat(),
+                                 "demand_liters": demand, "served_liters": demand - 1, "unmet_liters": 1,
+                                 "demand_multiplier": 1.0})
+        self.history_ticks += ticks
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -85,6 +103,11 @@ class FakeSimulator:
             key = path.removeprefix("/v1/")
             if key == "health":
                 return httpx.Response(200, json={"status": "ok"})
+            if key == "demand-history":
+                station = request.url.params.get("station_id")
+                limit = int(request.url.params.get("limit", "100"))
+                rows = [r for r in self.data["demand-history"] if r["station_id"] == station]
+                return httpx.Response(200, json=rows[-limit:], headers=headers)
             if key == "instance" and self.moving:
                 self.data["instance"]["tick"] += 10
             return httpx.Response(200, json=copy.deepcopy(self.data[key]), headers=headers)

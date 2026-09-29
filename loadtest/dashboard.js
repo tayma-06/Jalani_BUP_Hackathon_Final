@@ -46,5 +46,6 @@ export default function (data) {
 }
 
 export function handleSummary(data) {
+  delete data.setup_data; // holds the bearer token; never write credentials into evidence
   return { [__ENV.OUTPUT_FILE || 'artifacts/load-dashboard.json']: JSON.stringify(data, null, 2) };
 }

@@ -1,7 +1,9 @@
 import asyncio
 import csv
+import hashlib
 import hmac
 import io
+import json
 import logging
 import os
 import time
@@ -11,16 +13,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import metrics
 from app.config import Settings, settings
-from app.db import Alert, Recommendation, audit
+from app.db import Alert, Audit, Recommendation, audit
 from app.intelligence.engine import recommend
 from app.service import FuelService
 from app.sim.client import SimError
@@ -71,6 +74,21 @@ class FaultInput(BaseModel):
     parameters: dict = Field(default_factory=dict)
 
 
+class WebhookAlert(BaseModel):
+    status: Literal["firing", "resolved"]
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    startsAt: str = ""
+    endsAt: str = ""
+
+
+class WebhookPayload(BaseModel):
+    version: str = "4"
+    status: str = ""
+    receiver: str = ""
+    alerts: list[WebhookAlert] = Field(default_factory=list)
+
+
 def create_app(config: Settings = settings, service: FuelService | None = None):
     service = service or FuelService(config)
 
@@ -99,8 +117,11 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
         start = time.monotonic()
         response = await call_next(request)
         duration = time.monotonic() - start
-        service.latencies.append(duration)
-        service.errors.append(int(response.status_code >= 500))
+        # Prometheus scrapes are infrastructure traffic, not operator actions. Including them
+        # would pull the reported p95 and error rate down with the fastest requests we serve.
+        if request.url.path != "/metrics":
+            service.latencies.append(duration)
+            service.errors.append(int(response.status_code >= 500))
         route = request.scope.get("route")
         handler = route.path if route else "unmatched"
         metrics.http_requests.labels(handler, request.method, str(response.status_code)).inc()
@@ -145,8 +166,13 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
     @app.post("/api/auth/login")
     async def login(body: Login, request: Request):
         address = request.client.host if request.client else "local"
-        attempts = login_attempts[address]
         now = time.monotonic()
+        # Evict idle addresses so the map cannot grow without bound under a scan from many
+        # source addresses. Only a caller with recent failures keeps an entry.
+        if len(login_attempts) > 512:
+            for key in [k for k, v in login_attempts.items() if not v or v[-1] < now - 60]:
+                del login_attempts[key]
+        attempts = login_attempts[address]
         while attempts and attempts[0] < now - 60:
             attempts.popleft()
         if len(attempts) >= 10:
@@ -181,7 +207,74 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
     async def prometheus():
         metrics.age.set(service.age or 0)
         metrics.stale.set(int(not service.safe()))
+        # Reported per scrape, not per refresh, so a fallback stays visible even while the
+        # simulator is unreachable and the refresh loop is failing.
+        metrics.fallback.labels("prediction_service").set(0 if config.ml_service_url else 1)
+        metrics.fallback.labels("explanations").set(0 if config.llm_api_key else 1)
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/api/internal/alerts")
+    async def alertmanager_webhook(payload: WebhookPayload, credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Receive Prometheus alerts and record them alongside the simulator's own alerts.
+
+        Alertmanager cannot sign in, so the shared webhook token is the credential. Anything
+        that arrives here is written to the audit trail so a page is always attributable.
+        """
+        if not credentials or not hmac.compare_digest(credentials.credentials.encode(),
+                                                      config.alert_webhook_token.encode()):
+            raise HTTPException(401, "Invalid alert webhook token")
+        accepted = []
+        async with service.lock:
+            service.db.check()
+            tick = service.snapshot.instance.tick if service.snapshot else 0
+            with service.db.session() as session:
+                for item in payload.alerts:
+                    labels = item.labels
+                    name = labels.get("alertname", "UnknownAlert")
+                    # An alert is identified by its entire label set, not its name. For
+                    # example, the two optional-service fallbacks resolve independently.
+                    fingerprint = hashlib.sha256(json.dumps(labels, sort_keys=True).encode()).hexdigest()
+                    key = f"prometheus:{fingerprint}"
+                    row = session.get(Alert, key)
+                    summary = item.annotations.get("summary") or name
+                    body = {"source": "prometheus", "alertname": name, "type": name,
+                            "severity": labels.get("severity", "none"), "summary": summary,
+                            "message": summary, "entity_id": labels.get("instance", "monitoring"),
+                            "event_ids": [], "first_tick": row.payload.get("first_tick", tick) if row else tick,
+                            "last_tick": tick, "labels": labels,
+                            "starts_at": item.startsAt, "ends_at": item.endsAt}
+                    status = "RESOLVED" if item.status == "resolved" else "OPEN"
+                    # Repeated firing notifications must not undo an operator's ack.
+                    if row and row.status == "ACKNOWLEDGED" and item.status == "firing":
+                        status = "ACKNOWLEDGED"
+                    if row is None:
+                        session.add(Alert(id=key, run_id="monitoring", status=status, payload=body))
+                    else:
+                        row.run_id, row.status, row.payload = "monitoring", status, body
+                    audit(session, "alertmanager", f"alert.{item.status}", key, alertname=name)
+                    accepted.append(key)
+                session.commit()
+            # Delivery must be visible even while simulator reads are failing.
+            service.load_views()
+            service.build_network()
+        metrics.alerts.labels("prometheus").inc(len(accepted))
+        return {"accepted": accepted}
+
+    @app.get("/api/audit")
+    async def audit_log(limit: int = Query(200, ge=1, le=1000), before: int | None = Query(None, ge=1),
+                        claims=Depends(user)):
+        """Who changed what, newest first. Paged by `before` for older pages.
+
+        The trail is the accountability record for approvals, so it is written for every
+        user; reads are still restricted to signed-in users.
+        """
+        with service.db.session() as session:
+            query = select(Audit)
+            if before:
+                query = query.where(Audit.id < before)
+            rows = session.scalars(query.order_by(Audit.id.desc()).limit(limit))
+            return [{"id": row.id, "created_at": row.created_at, "actor": row.actor, "action": row.action,
+                     "target": row.target, "details": row.details} for row in rows]
 
     @app.get("/api/network/state")
     async def network(claims=Depends(user)):
@@ -240,7 +333,7 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
         async with service.lock:
             with service.db.session() as session:
                 row = session.get(Alert, alert_id)
-                if not row or row.run_id != service.run_id:
+                if not row or row.run_id not in {service.run_id, "monitoring"}:
                     raise HTTPException(404, "Alert not found")
                 if row.status != "RESOLVED":
                     row.status = "ACKNOWLEDGED"
@@ -271,7 +364,7 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
     @app.post("/api/allocations/{allocation_id}/cancel")
     async def cancel(allocation_id: int, claims=Depends(operator)):
         async with service.lock:
-            await service._refresh()
+            await service.refresh_locked()
             await service.final_gate()
             allocation = next((a for a in service.snapshot.allocations if a.id == allocation_id), None)
             if not allocation or allocation.status != "PENDING":
@@ -280,7 +373,7 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
                 audit(session, claims["sub"], "allocation.cancel_requested", str(allocation_id))
                 session.commit()
             result, _ = await service.client.request("POST", f"/v1/allocations/{allocation_id}/cancel")
-            await service._refresh()
+            await service.refresh_locked()
             return result
 
     @app.get("/api/supply")
@@ -347,7 +440,7 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
             result, _ = await service.client.request("POST", path, payload)
             if path == "/admin/reset":
                 service.reset_notice = True
-            await service._refresh()
+            await service.refresh_locked()
             return result
 
     @app.post("/api/control/sim/{action}")

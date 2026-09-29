@@ -54,6 +54,27 @@ def login(base, username, password):
     return data["access_token"]
 
 
+class TokenCache:
+    """Reuses one access token per account.
+
+    A retry loop calls the same check repeatedly. Signing in on every attempt
+    trips the application's sign-in rate limiter, so the reported error becomes
+    HTTP 429 and hides the failure that actually started the retries.
+    """
+
+    def __init__(self):
+        self._tokens = {}
+
+    def token(self, base, username, password):
+        key = (base.rstrip("/"), username)
+        if key not in self._tokens:
+            self._tokens[key] = login(base, username, password)
+        return self._tokens[key]
+
+    def forget(self, base, username):
+        self._tokens.pop((base.rstrip("/"), username), None)
+
+
 def code(data):
     if not isinstance(data, dict):
         return None

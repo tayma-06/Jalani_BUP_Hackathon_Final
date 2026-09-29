@@ -1,0 +1,18 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "fault": "stale_data",
+      "status": "passed",
+      "detection_seconds": 1.132,
+      "recovery_seconds": 1.053
+    },
+    {
+      "fault": "unavailable",
+      "status": "passed",
+      "detection_seconds": 1.096,
+      "recovery_seconds": 1.141
+    }
+  ],
+  "limits": "Write blocking, DB failure, lost-response reconciliation and SSE recovery require backend tests and separate drills."
+}

@@ -1,9 +1,0 @@
-apiVersion: 1
-providers:
-  - name: Jalani
-    orgId: 1
-    folder: Jalani
-    type: file
-    disableDeletion: true
-    options:
-      path: /var/lib/grafana/dashboards

@@ -1,1 +1,0 @@
-"""Jalani fuel operations application."""

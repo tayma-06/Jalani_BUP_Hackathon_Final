@@ -4,10 +4,10 @@ import json
 import os
 from pathlib import Path
 
-from http_checks import eventually, login, request, require
+from http_checks import TokenCache, eventually, request, require
 
 
-def smoke(base, expected_sha, username, password):
+def smoke(base, expected_sha, username, password, tokens):
     status, _, html = request(base, "/")
     require(status == 200 and isinstance(html, str) and "<html" in html.lower(),
             "Frontend did not serve HTML")
@@ -18,7 +18,7 @@ def smoke(base, expected_sha, username, password):
     require(status == 200 and isinstance(health, dict), "Overall health invalid")
     require(health.get("git_sha") == expected_sha, "Running git SHA does not match release")
     require(health.get("mode") == "NORMAL", "Application has not recovered to NORMAL")
-    token = login(base, username, password)
+    token = tokens.token(base, username, password)
     status, _, state = request(base, "/api/network/state", token=token)
     require(status == 200 and isinstance(state, dict), "Network read failed")
     require(state.get("stale") is False, "State is stale or freshness metadata is missing")
@@ -42,7 +42,9 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=float, default=120)
     args = parser.parse_args()
     username, password = os.environ["SMOKE_USER"], os.environ["SMOKE_PASSWORD"]
-    result = eventually(lambda: smoke(args.base, args.expected_sha, username, password), timeout=args.timeout)
+    tokens = TokenCache()
+    result = eventually(lambda: smoke(args.base, args.expected_sha, username, password, tokens),
+                        timeout=args.timeout)
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))

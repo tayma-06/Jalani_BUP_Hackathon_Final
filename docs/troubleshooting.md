@@ -18,7 +18,11 @@
 
 It is used only as a BuildKit secret during `pip wheel` / `npm ci`. It is never copied into an image, and CI does not use it.
 
-**A port is already in use (3000, 8080, 8000, 9090 or 3001).** Stop whatever uses it, e.g. an earlier `uvicorn` or `npm run dev`, or another stack (`docker ps`).
+**A port is already in use (3000, 8080, 8000, 9090, 9093 or 3001).** Stop whatever uses it, e.g. an earlier `uvicorn` or `npm run dev`, or another stack (`docker ps`).
+
+**An alert fires but nobody is notified.** Open `http://localhost:9093` (Alertmanager). If it shows no receivers, the release is missing `observability/alertmanager.yml` — see the deploy notes. Alerts are also recorded in the app under **Alerts** and **Audit log**, so the incident is still attributable without a notification channel.
+
+**The frontend container is unhealthy but the backend is fine.** `/health` now proxies the backend's liveness, so a frontend health failure means nginx cannot reach the API. Check `docker compose logs backend frontend`; a `JWT_SECRET` shorter than 32 characters is the usual cause.
 
 **The backend stays unhealthy.** Run `docker compose logs backend`. The usual causes are:
 - The DB is not ready yet. Compose waits for its health check, so give it a few seconds.

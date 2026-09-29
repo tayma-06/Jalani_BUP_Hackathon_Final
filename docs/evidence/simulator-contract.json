@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "source": "real HTTP target; confirm official image in CI logs",
+  "replay_http_status": 201,
+  "same_allocation_id": true,
+  "changed_body_rejected": true,
+  "pending_cancel": true,
+  "station_count": 4,
+  "supply_arrival_count": 22,
+  "last_planned_supply_tick": 212,
+  "final_tick": 10,
+  "history_rows": 120,
+  "metrics": {
+    "served_demand_liters": 6414.119,
+    "unmet_demand_liters": 0.0,
+    "service_level": 1.0,
+    "allocation_liters": 0.0,
+    "allocation_failures": 0
+  }
+}

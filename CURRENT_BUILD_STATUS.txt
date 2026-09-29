@@ -1,14 +1,21 @@
-JALANI - CURRENT BUILD SNAPSHOT
+JALANI - CURRENT BUILD STATUS (29 September 2026)
 
-Created backend and frontend source, configuration, dependency manifest and behavioral tests are included alongside the original planning and CI/CD pack.
+The application runs end to end against the official simulator in Docker.
+Start: docker compose up -d --build --wait, then open http://localhost:3000 (see README.md).
 
-Verification at export:
-- Frontend TypeScript check: passed.
-- Frontend ESLint check: passed.
-- Backend tests: not completed. Initial collection hit an environment SOCKS proxy dependency issue.
-- Official simulator/Docker integration: not run (Docker unavailable).
-- GitHub push: not performed; connected account cannot access the repository.
+Verified:
+- Backend: ruff clean; 24/24 tests on Python 3.11 and 3.14. Pinned locks: backend/requirements*.lock.
+- Frontend: lint, typecheck, build; 15/15 tests on Node 22 and 24.
+- CI/CD automation: 14/14 tests on Python 3.11 (Linux).
+- Full Docker stack (simulator, postgres, backend, frontend, prometheus, grafana) healthy.
+- Official simulator contract, app smoke, fault injection + recovery (~1 s) and end-to-end drill all passed.
+- All 9 pages checked in a browser at desktop and mobile widths.
+- Policy benchmark: docs/benchmark.md. Load test: docs/load-test.md (30 users, 0 failures, p95 132 ms).
+- Grafana dashboard: 20 panels with live data.
 
-This is a work-in-progress snapshot, not a verified final submission. Root Docker Compose, environment template, backend dependency locks, frontend behavioral tests, load-test results, benchmark evidence, and final run documentation remain unfinished.
+Not done:
+- GitHub Actions / GHCR release have not been run: the code is not yet pushed.
+- Remote deployment and rollback: no host available.
+- Final timed rehearsal with a backup recording.
 
-New source: backend/app/, backend/config/, backend/tests/, frontend/, pyproject.toml.
+Details: docs/validation-status.md and docs/evidence-checklist.md.

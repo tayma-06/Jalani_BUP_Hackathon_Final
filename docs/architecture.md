@@ -12,6 +12,7 @@ Jalani is a control room for the organizers' fuel-supply simulator. It reads the
                  │  backend  (FastAPI, 1 worker, :8080) ──REST poll + SSE──▶ simulator :8000  │
                  │     │   │                                  (official image, unchanged)  │
                  │     │   └── /metrics ◀── prometheus :9090 ◀── grafana :3001              │
+                 │     │        └── alert rules ──▶ alertmanager :9093 ──▶ /api/internal/alerts
                  │     ▼                                                                    │
                  │  db  (PostgreSQL 16; SQLite for local dev/tests)                         │
                  └────────────────────────────────────────────────────────────────────────────┘
@@ -23,8 +24,8 @@ Jalani is a control room for the organizers' fuel-supply simulator. It reads the
 | Service loop | `backend/app/service.py` | Refresh on a 1 s poll or an SSE nudge; snapshot consistency check; reset detection; ledger reconciliation; mode (NORMAL / DEGRADED / RECOVERING) |
 | Intelligence | `backend/app/intelligence/engine.py` | Forecast, Monte Carlo risk, allocation policy, batch constraint validation, alert detection |
 | API | `backend/app/main.py` | JWT roles (viewer / operator / admin), health, metrics, approvals, admin control room |
-| Persistence | `backend/app/db.py` | Recommendations, execution intents, demand history, snapshots, alerts, incidents, audit log |
-| Frontend | `frontend/src/App.tsx` | Nine pages: overview, stations, recommendations, alerts, supply, forecasts, history, health, control room |
+| Persistence | `backend/app/db.py` | Recommendations, execution intents, demand history, snapshots, alerts, incidents, audit log. Every table is bounded by an explicit retention window applied after each write, so a deployment that runs for months does not grow without limit |
+| Frontend | `frontend/src/App.tsx` | Ten pages: overview, stations, recommendations, alerts, supply, forecasts, history, health, control room, audit log |
 
 ## Decision pipeline (every refresh)
 

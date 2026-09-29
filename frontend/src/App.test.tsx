@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App, { RecommendationCard } from './App';
 import { api, label, number, percent } from './api';
-import type { Fuel, Network, Recommendation, Session } from './types';
+import type { AuditEntry, Fuel, Network, Recommendation, Session } from './types';
 
 const fuelState = (inventory: number, risk: number) => ({ inventory, capacity: 15000, in_transit: 0, forecast_12h: 4000, hours_to_stockout: risk > 0.5 ? 2.5 : null, risk, risk_level: risk > 0.5 ? 'HIGH' : 'LOW' });
 const tankFuels = (inventory: number, risk: number) => ({ DIESEL: fuelState(inventory, risk), PETROL: fuelState(inventory, 0), OCTANE: fuelState(inventory, 0) }) as Record<Fuel, ReturnType<typeof fuelState>>;
@@ -32,6 +32,11 @@ const recommendation: Recommendation = {
 };
 
 const health = { status: 'healthy', mode: 'NORMAL', version: '1.2.3', git_sha: 'abcdef1234567890', p95_latency_ms: 2, error_rate: 0, reason: '', components: { simulator: { status: 'healthy' } } };
+const auditPage: AuditEntry[] = [
+  { id: 30, created_at: '2026-01-01T10:31:00+00:00', actor: 'operator', action: 'decision.approved', target: 'rec-1', details: { quantity: 7000 } },
+  { id: 29, created_at: '2026-01-01T10:30:00+00:00', actor: 'alertmanager', action: 'alert.firing', target: 'prometheus:StaleSimulatorData:warning', details: {} },
+  { id: 28, created_at: '2026-01-01T10:29:00+00:00', actor: 'admin', action: 'settings.autopilot', target: 'advisory', details: {} },
+];
 
 type Call = { path: string; method: string; body?: unknown; auth?: string };
 let calls: Call[];
@@ -53,6 +58,10 @@ function mockBackend(users: Record<string, [string, Session['role']]> = { operat
     if (path === '/network/state') return reply(200, state);
     if (path === '/health') return reply(200, health);
     if (path === '/recommendations') return reply(200, [recommendation]);
+    if (path.startsWith('/audit')) {
+      const before = new URLSearchParams(path.split('?')[1] || '').get('before');
+      return reply(200, before ? auditPage.slice(-1).map(e => ({ ...e, id: Number(before) - 1 })) : auditPage);
+    }
     if (method === 'POST') return reply(200, { status: 'PENDING' });
     return reply(200, []);
   }));
@@ -227,5 +236,45 @@ describe('degraded operation', () => {
     expect(screen.getByText('97.3%')).toBeInTheDocument();
     await user.click(within(screen.getByRole('navigation', { name: 'Main navigation' })).getByRole('button', { name: /Recommendations/ }));
     expect(await screen.findByRole('button', { name: /Approve shipment/ })).toBeDisabled();
+  });
+});
+
+describe('audit log', () => {
+  it('lists who changed what, newest first, and pages backwards without repeating a row', async () => {
+    renderApp();
+    const user = await signIn('operator', 'demo-operator');
+    await screen.findByText('Network overview');
+    await user.click(within(screen.getByRole('navigation', { name: 'Main navigation' })).getByRole('button', { name: /Audit log/ }));
+    expect(await screen.findByText('Decision approved')).toBeInTheDocument();
+    expect(screen.getByText(/rec-1/)).toBeInTheDocument();
+    expect(screen.getByText(/10:31/)).toBeInTheDocument();    expect(calls.find(c => c.path.startsWith('/audit'))?.auth).toBe('Bearer token-operator');
+
+    await user.click(screen.getByRole('button', { name: 'Load older entries' }));
+    await waitFor(() => expect(calls.map(c => c.path).filter(p => p.startsWith('/audit')).length).toBeGreaterThan(1));
+    expect(calls.map(c => c.path).filter(p => p.startsWith('/audit'))).toEqual([
+      '/audit?limit=100',
+      '/audit?limit=100&before=28',
+    ]);
+    // The older page is appended rather than replacing, so the total grows and nothing repeats.
+    expect(await screen.findByText('4 entries, newest first')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 3 }).map(h => h.textContent)).toEqual([
+      'Decision approved', 'Alert firing', 'Settings autopilot', 'Settings autopilot',
+    ]);
+  });
+
+  it('explains a failure instead of showing an empty trail', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string) => {
+      const path = input.replace(/^\/api/, '');
+      if (path === '/auth/login') return reply(200, { access_token: 'token-operator', role: 'operator', username: 'operator' });
+      if (path === '/network/state') return reply(200, state);
+      if (path === '/health') return reply(200, health);
+      if (path.startsWith('/audit')) return reply(503, { detail: 'audit store unavailable' });
+      return reply(200, []);
+    }));
+    renderApp();
+    const user = await signIn('operator', 'demo-operator');
+    await screen.findByText('Network overview');
+    await user.click(within(screen.getByRole('navigation', { name: 'Main navigation' })).getByRole('button', { name: /Audit log/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('audit store unavailable');
   });
 });

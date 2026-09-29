@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     stream_enabled: bool = True
     llm_api_key: str = ""
     ml_service_url: str = ""
+    # Shared secret for the Alertmanager webhook. Alertmanager cannot present a user token,
+    # so this is compared in constant time instead of going through the normal login flow.
+    alert_webhook_token: str = Field(default="demo-alert-webhook-token", min_length=8)
 
 
 settings = Settings()

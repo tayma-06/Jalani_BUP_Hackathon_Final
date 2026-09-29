@@ -1,6 +1,0 @@
-version: greedy_v1
-target_cover_hours: 24
-reserve_hours: 12
-minimum_shipment: 500
-constrained_dispatch_factor: 0.5
-weights: {DIESEL: 1.3, PETROL: 1.0, OCTANE: 0.8}

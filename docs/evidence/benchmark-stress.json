@@ -1,0 +1,199 @@
+{
+  "results": [
+    {
+      "policy": "do_nothing",
+      "scenario": "stress",
+      "ticks": 288,
+      "seed": 12345,
+      "service_level": 0.2653,
+      "served_liters": 85900.0,
+      "unmet_liters": 237893.2,
+      "allocation_liters": 0.0,
+      "allocation_failures": 0,
+      "approved_shipments": 0,
+      "approvals_blocked": 0,
+      "approved_liters": 0,
+      "unmet_curve": [
+        {
+          "tick": 24,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 48,
+          "unmet_liters": 342.5
+        },
+        {
+          "tick": 72,
+          "unmet_liters": 14418.4
+        },
+        {
+          "tick": 96,
+          "unmet_liters": 37362.3
+        },
+        {
+          "tick": 120,
+          "unmet_liters": 52658.4
+        },
+        {
+          "tick": 144,
+          "unmet_liters": 88911.4
+        },
+        {
+          "tick": 168,
+          "unmet_liters": 122929.2
+        },
+        {
+          "tick": 192,
+          "unmet_liters": 144759.4
+        },
+        {
+          "tick": 216,
+          "unmet_liters": 160215.3
+        },
+        {
+          "tick": 240,
+          "unmet_liters": 189187.7
+        },
+        {
+          "tick": 264,
+          "unmet_liters": 216251.1
+        },
+        {
+          "tick": 288,
+          "unmet_liters": 237893.2
+        }
+      ],
+      "wall_seconds": 63.2
+    },
+    {
+      "policy": "naive_reorder",
+      "scenario": "stress",
+      "ticks": 288,
+      "seed": 12345,
+      "service_level": 1.0,
+      "served_liters": 323793.2,
+      "unmet_liters": 0.0,
+      "allocation_liters": 330136.0,
+      "allocation_failures": 0,
+      "approved_shipments": 79,
+      "approvals_blocked": 2,
+      "approved_liters": 330136,
+      "unmet_curve": [
+        {
+          "tick": 24,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 48,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 72,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 96,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 120,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 144,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 168,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 192,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 216,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 240,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 264,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 288,
+          "unmet_liters": 0.0
+        }
+      ],
+      "wall_seconds": 91.4
+    },
+    {
+      "policy": "greedy_v1",
+      "scenario": "stress",
+      "ticks": 288,
+      "seed": 12345,
+      "service_level": 1.0,
+      "served_liters": 323793.2,
+      "unmet_liters": 0.0,
+      "allocation_liters": 306995.0,
+      "allocation_failures": 0,
+      "approved_shipments": 84,
+      "approvals_blocked": 4,
+      "approved_liters": 306995,
+      "unmet_curve": [
+        {
+          "tick": 24,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 48,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 72,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 96,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 120,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 144,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 168,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 192,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 216,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 240,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 264,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 288,
+          "unmet_liters": 0.0
+        }
+      ],
+      "wall_seconds": 153.5
+    }
+  ]
+}

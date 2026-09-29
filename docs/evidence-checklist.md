@@ -1,24 +1,24 @@
-# Evidence checklist — fill with real results only
+# Evidence checklist: real results only
 
-Status starts **NOT RUN / NOT IMPLEMENTED**. An included configuration file is not operational evidence.
+A configuration file is not operational evidence. Every DONE row below points to a measured artifact. See [validation-status.md](validation-status.md) for details.
 
-| Evidence | Status | File/link to add |
+| Evidence | Status | File/link |
 |---|---|---|
-| Local automation validation | See validation-status.md | `docs/validation-status.md` |
-| End-to-end working app and source repository | NOT IMPLEMENTED in this pack | Repository URL + screenshot |
-| Official simulator integration | NOT RUN | `simulator-contract.json`, image version/digest |
-| Demand/risk/valid allocation with explanation | NOT RUN | Recorded decision and measured outcome |
-| Human approval + durable idempotency/restart proof | NOT RUN | Backend test report + decision history |
-| Red PR followed by repaired green PR | NOT RUN | Two GitHub Actions run links |
-| Passing tagged release | NOT RUN | CI run and both image digests |
-| Deployed version and SHA | NOT RUN | `deployed.json` + UI/health screenshot |
-| Failed candidate and verified rollback | NOT RUN | `rollback.json`, timing, data continuity check |
-| Simulator fault and recovery | NOT RUN | `fault-recovery.json` and health screenshot |
-| DB failure blocks execution | NOT RUN | Behavioral test + demonstration |
-| Monitoring: application/system/intelligence/logs | NOT RUN | Dashboard screenshots + representative redacted logs |
-| Meaningful application load test | NOT RUN | `load-dashboard.json`, hardware, CPU/memory, bottleneck analysis |
-| Fair policy comparison | NOT RUN | Same seed/events/horizon, results and limitations |
-| Architecture and setup | SPECIFIED | `plan.md`, actual README after implementation |
-| Final rehearsal | NOT RUN | Actual event time limit, measured run time, backup recording |
+| Local automation validation | DONE | `docs/validation-status.md` |
+| End-to-end working app and source repository | DONE locally | `docs/evidence/app-*.png`; repository `github.com/tayma-06/BUP_Hackathon_Final` (push pending) |
+| Official simulator integration | DONE | `docs/evidence/simulator-contract.json`, image `sha256:7067050693f4…` |
+| Demand/risk/valid allocation with explanation | DONE | `docs/evidence/e2e-drill.json` (proposal, risk before/after), `docs/evidence/app-recommendations.png` |
+| Human approval + durable idempotency/restart proof | DONE | Backend tests `test_concurrent_approvals_create_one_durable_intent`, `test_lost_accepted_response_reconciles_after_restart`; drill `duplicate_approval` (2 × HTTP 200 → 1 simulator allocation) |
+| Red PR followed by repaired green PR | NOT RUN | Needs GitHub Actions |
+| Passing tagged release | NOT RUN | Needs GitHub Actions + GHCR |
+| Deployed version and SHA | Local only | `docs/evidence/app-smoke.json` (running SHA checked). No remote host |
+| Failed candidate and verified rollback | NOT RUN on a host | Script logic covered by `tests_ci/test_deployment.py` (fake Docker) |
+| Simulator fault and recovery | DONE | `docs/evidence/fault-recovery.json`, `docs/evidence/app-system-health.png` |
+| DB failure blocks execution | Test only | `test_db_failure_blocks_post_but_preserves_cache` |
+| Monitoring: application/system/intelligence/logs | DONE (no alert delivery) | `docs/evidence/grafana-*.png`; structured JSON event logs via `docker compose logs backend` |
+| Meaningful application load test | DONE | `docs/load-test.md`, `docs/evidence/load-dashboard.json` |
+| Fair policy comparison | DONE | `docs/benchmark.md`, `docs/evidence/benchmark-baseline.json`, `docs/evidence/benchmark-stress.json` |
+| Architecture and setup | DONE | `README.md`, `docs/architecture.md`, `docs/troubleshooting.md` |
+| Final rehearsal | NOT RUN | `docs/demo-script.md` is ready; record the timing and a backup video |
 
-For every run, record: date, git SHA, simulator image, configured speed/tick length, scenario/events, machine CPU/RAM, exact command, result, and limitation. Keep passwords, keys, full `.env`, and resolved Compose configuration out of evidence.
+For every new run, record: date, git SHA, simulator image, configured speed and tick length, scenario/events, machine CPU/RAM, exact command, result, and limitation. Keep passwords, keys, the full `.env` and the resolved Compose configuration out of evidence.

@@ -1,0 +1,196 @@
+{
+  "results": [
+    {
+      "policy": "do_nothing",
+      "ticks": 288,
+      "seed": 12345,
+      "service_level": 0.3074,
+      "served_liters": 85900.0,
+      "unmet_liters": 193586.0,
+      "allocation_liters": 0.0,
+      "allocation_failures": 0,
+      "approved_shipments": 0,
+      "approvals_blocked": 0,
+      "approved_liters": 0,
+      "unmet_curve": [
+        {
+          "tick": 24,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 48,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 72,
+          "unmet_liters": 1408.2
+        },
+        {
+          "tick": 96,
+          "unmet_liters": 11244.8
+        },
+        {
+          "tick": 120,
+          "unmet_liters": 24585.2
+        },
+        {
+          "tick": 144,
+          "unmet_liters": 51834.9
+        },
+        {
+          "tick": 168,
+          "unmet_liters": 78970.1
+        },
+        {
+          "tick": 192,
+          "unmet_liters": 100452.1
+        },
+        {
+          "tick": 216,
+          "unmet_liters": 115908.1
+        },
+        {
+          "tick": 240,
+          "unmet_liters": 144880.4
+        },
+        {
+          "tick": 264,
+          "unmet_liters": 171943.9
+        },
+        {
+          "tick": 288,
+          "unmet_liters": 193586.0
+        }
+      ],
+      "wall_seconds": 101.0
+    },
+    {
+      "policy": "naive_reorder",
+      "ticks": 288,
+      "seed": 12345,
+      "service_level": 1.0,
+      "served_liters": 279486.0,
+      "unmet_liters": 0.0,
+      "allocation_liters": 297971.0,
+      "allocation_failures": 0,
+      "approved_shipments": 70,
+      "approvals_blocked": 0,
+      "approved_liters": 297971,
+      "unmet_curve": [
+        {
+          "tick": 24,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 48,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 72,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 96,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 120,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 144,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 168,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 192,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 216,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 240,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 264,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 288,
+          "unmet_liters": 0.0
+        }
+      ],
+      "wall_seconds": 170.6
+    },
+    {
+      "policy": "greedy_v1",
+      "ticks": 288,
+      "seed": 12345,
+      "service_level": 1.0,
+      "served_liters": 279486.0,
+      "unmet_liters": 0.0,
+      "allocation_liters": 269033.0,
+      "allocation_failures": 0,
+      "approved_shipments": 72,
+      "approvals_blocked": 0,
+      "approved_liters": 269033,
+      "unmet_curve": [
+        {
+          "tick": 24,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 48,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 72,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 96,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 120,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 144,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 168,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 192,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 216,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 240,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 264,
+          "unmet_liters": 0.0
+        },
+        {
+          "tick": 288,
+          "unmet_liters": 0.0
+        }
+      ],
+      "wall_seconds": 222.5
+    }
+  ]
+}

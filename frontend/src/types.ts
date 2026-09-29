@@ -1,6 +1,6 @@
 export type Fuel = 'DIESEL' | 'PETROL' | 'OCTANE';
 export const fuels: Fuel[] = ['DIESEL', 'PETROL', 'OCTANE'];
-export type Page = 'Overview' | 'Stations & depots' | 'Recommendations' | 'Alerts' | 'Supply & disruptions' | 'Forecasts' | 'Decision history' | 'System health' | 'Control room';
+export type Page = 'Overview' | 'Stations & depots' | 'Recommendations' | 'Alerts' | 'Supply & disruptions' | 'Forecasts' | 'Decision history' | 'System health' | 'Control room' | 'Audit log';
 export type Session = { access_token: string; role: 'viewer' | 'operator' | 'admin'; username: string };
 export type FuelState = { inventory: number; capacity: number; in_transit?: number; forecast_12h?: number; hours_to_stockout?: number | null; risk?: number; risk_level?: string; next_supply_tick?: number | null };
 export type Tank = { id: string; name: string; region_id: string; status: string; demand_multiplier?: number; fuels: Record<Fuel, FuelState>; dispatch_used?: number; dispatch_capacity_per_tick?: number };
@@ -27,3 +27,4 @@ export type Decision = { id: string; recommendation_id: string; run_id: string; 
 export type Incident = { id: string; tick: number; text: string; source: string; severity: string };
 export type Health = { status: string; mode: string; version: string; git_sha: string; p95_latency_ms: number | null; error_rate: number | null; components: Record<string, { status: string; [key: string]: string | number | null }>; reason: string };
 export type Forecast = { start_tick: number; tick_minutes: number; mean: number[]; std: number[]; inventory_path: number[]; model_version: string; source: string; risk: number; hours_to_stockout: number | null; history: { tick: number; demand_liters: number; served_liters: number }[]; uncertainty_note: string };
+export type AuditEntry = { id: number; created_at: string; actor: string; action: string; target: string; details: Record<string, unknown> };

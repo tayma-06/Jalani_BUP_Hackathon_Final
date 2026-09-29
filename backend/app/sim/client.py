@@ -74,19 +74,32 @@ class SimulatorClient:
                 metrics.sim_duration.labels(endpoint).observe(time.monotonic() - start)
         raise SimError(503, "UNAVAILABLE", "No simulator response")
 
+    async def gather(self, calls):
+        """Await every request to completion before surfacing a failure.
+
+        Plain `asyncio.gather` raises on the first error and leaves its siblings running as
+        orphans. At one refresh per second against a flaky simulator those pile up and hold
+        connections, so all results are collected first and the earliest failure is re-raised.
+        """
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results
+
     async def snapshot(self, since_tick=0):
         first, first_stale = await self.request("GET", "/v1/instance")
         start = Instance.model_validate(first)
         names = {"regions": "regions", "depots": "depots", "stations": "stations", "routes": "routes",
                  "supply": "supply-arrivals", "events": "events", "allocations": "allocations", "metrics": "metrics"}
-        results = await asyncio.gather(*(self.request("GET", f"/v1/{name}") for name in names.values()))
+        results = await self.gather(self.request("GET", f"/v1/{name}") for name in names.values())
         data = {key: result[0] for key, result in zip(names, results)}
         stale = first_stale or any(result[1] for result in results)
         # Per-station retrieval avoids losing rows when the network grows.
         limit = min(2000, max(48, (max(0, start.tick - since_tick) + 2) * 3))
-        histories = await asyncio.gather(*(self.request("GET", "/v1/demand-history", params={
+        histories = await self.gather(self.request("GET", "/v1/demand-history", params={
             "station_id": s["id"], "limit": limit
-        }) for s in data["stations"]))
+        }) for s in data["stations"])
         data["history"] = [row for history, _ in histories for row in history]
         stale = stale or any(flag for _, flag in histories)
         last, last_stale = await self.request("GET", "/v1/instance")

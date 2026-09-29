@@ -7,12 +7,13 @@ from collections import deque
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import metrics
 from app.config import Settings
 from app.db import (
+    KEEP_HISTORY,
     Alert,
     Database,
     DemandObservation,
@@ -71,6 +72,13 @@ class FuelService:
         self.errors = deque(maxlen=1000)
         self.last_cycle_ms = None
         self.last_saved_tick = -100
+        self.last_pruned_tick = -100
+        # Demand history that has scrolled out of the simulator's per-request window. Seeded
+        # from the database once per run, then kept in memory so a refresh does not re-read
+        # and re-deserialise the whole window on every tick.
+        self.history_cache = {}
+        self.history_saved = set()
+        self.history_run = None
 
     def event(self, name, **details):
         log.info(json.dumps({"event": name, "tick": self.snapshot.instance.tick if self.snapshot else None,
@@ -97,10 +105,12 @@ class FuelService:
             return
         runtime = self.db.setting("runtime", {})
         self.run_id = runtime.get("run_id", self.run_id)
-        row = self.db.last_snapshot()
+        # Scoped to this run: the newest snapshot overall may belong to a run that has since
+        # been reset, which would silently leave the operator with no cached view.
+        row = self.db.last_snapshot(self.run_id)
         if row and row.run_id == self.run_id:
             self.snapshot = Snapshot.model_validate(row.payload)
-            self.analysis = analyse(self.snapshot, self.config.monte_carlo_paths)
+            self.analysis = analyse(self.snapshot, self.config.monte_carlo_paths, self.config.horizon_hours)
             self.build_network()
         self.autopilot = self.db.setting("autopilot", {"mode": "advisory"})["mode"]
         configured = self.db.setting("policy", {})
@@ -111,6 +121,14 @@ class FuelService:
     async def refresh(self):
         async with self.lock:
             return await self._refresh()
+
+    async def refresh_locked(self):
+        """Refresh while the caller already holds `self.lock`.
+
+        `asyncio.Lock` is not reentrant, so an HTTP handler that must refresh inside an
+        existing critical section uses this rather than `refresh()`, which would deadlock.
+        """
+        return await self._refresh()
 
     async def _refresh(self):
         start_time = time.monotonic()
@@ -140,32 +158,49 @@ class FuelService:
                 self.run_id = str(uuid4())
                 self.analysis = {}
                 self.last_saved_tick = -100
+                self.last_pruned_tick = -100
                 self.generation_uncertain = False
+                self.history_cache, self.history_saved, self.history_run = {}, set(), None
                 self.event("sim.reset_detected")
             self.reset_notice = False
             # Merge persisted history into the current run; IDs are only unique within a run.
             with self.db.session() as session:
-                known = {r.sim_id: r for r in session.scalars(select(DemandObservation).where(
-                    DemandObservation.run_id == self.run_id).order_by(DemandObservation.tick.desc()).limit(18000))}
-                merged = {key: value.payload for key, value in known.items()}
+                if self.history_run != self.run_id:
+                    self.history_cache = {
+                        row.sim_id: row.payload
+                        for row in session.scalars(
+                            select(DemandObservation)
+                            .where(DemandObservation.run_id == self.run_id)
+                            .order_by(DemandObservation.tick.desc())
+                            .limit(KEEP_HISTORY)
+                        )
+                    }
+                    self.history_saved = set(self.history_cache)
+                    self.history_run = self.run_id
                 station_map = {s.id: s for s in snapshot.stations}
                 for observation in snapshot.history:
-                    payload = observation.model_dump(mode="json")
                     station = station_map[observation.station_id]
+                    payload = observation.model_dump(mode="json")
+                    # Recomputed for the visible window every tick, because a demand event
+                    # starting or ending changes what counts as unexplained demand.
                     payload["demand_multiplier"] = historical_multiplier(snapshot, station, observation.tick)
-                    if observation.id not in known:
+                    self.history_cache[observation.id] = payload
+                    if observation.id not in self.history_saved:
                         session.add(DemandObservation(run_id=self.run_id, sim_id=observation.id,
                             tick=observation.tick, station_id=observation.station_id, fuel_type=observation.fuel_type,
                             demand=observation.demand_liters, payload=payload))
-                    merged[observation.id] = payload
-                if merged:
-                    snapshot = Snapshot.model_validate({**snapshot.model_dump(mode="json"), "history": list(merged.values())})
+                        self.history_saved.add(observation.id)
+                if len(self.history_cache) > KEEP_HISTORY:
+                    self.trim_history()
+                if self.history_cache:
+                    snapshot = Snapshot.model_validate(
+                        {**snapshot.model_dump(mode="json"), "history": list(self.history_cache.values())})
                 expected = max(0, snapshot.start_tick - max(since if not reset else 0, 0)) * len(snapshot.stations) * 3
                 recent = sum(since < h.tick <= snapshot.start_tick for h in snapshot.history) if not reset else 0
                 self.history_gap = expected > recent
                 ledger = {a.idempotency_key: a for a in snapshot.allocations}
                 unresolved = False
-                for execution in session.scalars(select(Execution)):
+                for execution in self.db.open_executions(session, self.run_id):
                     if execution.run_id != self.run_id:
                         if execution.status in {"UNKNOWN", "PREPARED", "PENDING", "IN_TRANSIT"}:
                             execution.status = "ABANDONED_RESET"
@@ -186,10 +221,16 @@ class FuelService:
                         unresolved = True
                 self.unresolved = unresolved
                 self.db.put_setting(session, "runtime", {"run_id": self.run_id, "tick": snapshot.instance.tick})
-                if snapshot.instance.tick - self.last_saved_tick >= 4 or reset or not previous:
+                # Saving a snapshot is the only thing that can push the snapshot table past its
+                # cap, so pruning always follows a write and additionally runs on its own cadence.
+                saved = snapshot.instance.tick - self.last_saved_tick >= 4 or reset or not previous
+                if saved:
                     session.add(SnapshotRecord(run_id=self.run_id, tick=snapshot.instance.tick,
                                                payload=snapshot.model_dump(mode="json")))
                     self.last_saved_tick = snapshot.instance.tick
+                if saved or snapshot.instance.tick - self.last_pruned_tick >= 8 or reset or not previous:
+                    self.db.prune(session, self.run_id)
+                    self.last_pruned_tick = snapshot.instance.tick
                 session.commit()
             analysis = await asyncio.to_thread(analyse, snapshot, self.config.monte_carlo_paths, self.config.horizon_hours)
             new_alerts = detect(snapshot, analysis, None if reset else previous)
@@ -229,6 +270,16 @@ class FuelService:
             metrics.stale.set(int(not self.safe()))
         return False
 
+    def trim_history(self):
+        """Drop the oldest observations, keeping the same window every read would return."""
+        excess = len(self.history_cache) - KEEP_HISTORY
+        if excess <= 0:
+            return
+        oldest = sorted(self.history_cache, key=lambda key: self.history_cache[key]["tick"])[:excess]
+        for key in oldest:
+            del self.history_cache[key]
+            self.history_saved.discard(key)
+
     def persist_intelligence(self, snapshot, alerts, plans):
         tick = snapshot.instance.tick
         with self.db.session() as session:
@@ -237,6 +288,8 @@ class FuelService:
             for row in open_recs:
                 if row.run_id != self.run_id or tick - row.created_tick > 4 or row.payload["action"]["route_id"] not in valid_routes:
                     row.status = "EXPIRED"
+            # Expiring the backlog above can overshoot the retention cap, so re-apply it here.
+            self.db.prune(session, self.run_id)
             existing = {(r.payload["station_id"], r.payload["fuel_type"]) for r in open_recs if r.status == "PROPOSED"}
             for plan in plans:
                 if (plan["station_id"], plan["fuel_type"]) not in existing:
@@ -265,6 +318,10 @@ class FuelService:
                         "source": "template", "severity": item["severity"]}))
                     metrics.alerts.labels(item["severity"]).inc()
             for row in session.scalars(select(Alert).where(Alert.run_id == self.run_id)):
+                # Prometheus owns its own firing/resolved lifecycle. Older installations
+                # may have stored these rows under the current simulator run.
+                if row.payload.get("source") == "prometheus":
+                    continue
                 if row.id not in seen and tick - row.payload["last_tick"] >= 4:
                     row.status = "RESOLVED"
             session.commit()
@@ -275,7 +332,7 @@ class FuelService:
                 for r in session.scalars(select(Recommendation).where(Recommendation.run_id == self.run_id)
                                         .order_by(Recommendation.created_tick.desc()).limit(200))]
             self.alerts = [{**r.payload, "id": r.id, "status": r.status} for r in session.scalars(
-                select(Alert).where(Alert.run_id == self.run_id))]
+                select(Alert).where(or_(Alert.run_id == self.run_id, Alert.run_id == "monitoring")))]
             self.incidents = [{"id": r.id, **r.payload} for r in session.scalars(
                 select(Incident).where(Incident.run_id == self.run_id))][-50:][::-1]
             self.decisions = [self.execution_json(r) for r in session.scalars(

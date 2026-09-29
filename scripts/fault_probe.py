@@ -6,12 +6,13 @@ import time
 from pathlib import Path
 
 from app_smoke import smoke
-from http_checks import eventually, login, request, require
+from http_checks import TokenCache, eventually, request, require
 
 
 def run(simulator, base, sha, user, password):
-    eventually(lambda: smoke(base, sha, user, password))
-    token = login(base, user, password)
+    tokens = TokenCache()
+    eventually(lambda: smoke(base, sha, user, password, tokens))
+    token = tokens.token(base, user, password)
     results = []
     for kind in ("stale_data", "unavailable"):
         start = time.monotonic()
@@ -44,7 +45,7 @@ def run(simulator, base, sha, user, password):
             status, _, _ = request(simulator, "/admin/faults/clear", "POST")
             require(status == 200, "Could not clear isolated test faults")
         recovery_start = time.monotonic()
-        eventually(lambda: smoke(base, sha, user, password), timeout=90)
+        eventually(lambda: smoke(base, sha, user, password, tokens), timeout=90)
         results.append({"fault": kind, "status": "passed", "detection_seconds": round(detected, 3),
                         "recovery_seconds": round(time.monotonic() - recovery_start, 3)})
     return {"status": "passed", "checks": results,

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } f
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, ArrowDownToLine, ArrowRight, Bell, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, Droplets, Flag, Fuel, History, LayoutDashboard, LogOut, MapPin, Network as NetworkIcon, Play, RefreshCw, Settings2, ShieldCheck, Sparkles, TriangleAlert, Truck, Warehouse, Waves, X } from 'lucide-react';
 import { api, label, number, percent, readSession } from './api';
-import { fuels, type Alert, type AuditEntry, type Decision, type Forecast, type Health, type Incident, type Network, type Page, type Recommendation, type Session, type SimEvent, type Supply, type Tank, type Fuel as FuelType } from './types';
+import { fuels, type Alert, type AuditEntry, type Briefing, type Decision, type Forecast, type Health, type Incident, type Network, type Page, type Recommendation, type Session, type SimEvent, type Supply, type Tank, type Fuel as FuelType } from './types';
 
 // recharts is the heaviest dependency in the app and is only needed on the forecast page, so
 // the chart code is fetched on demand instead of blocking the first paint.
@@ -167,7 +167,7 @@ function Login({ onLogin }: { onLogin: (value: Session) => void }) {
 
 function Overview({ state, name, navigate }: { state: Network; name: (id: string) => string; navigate: (page: Page) => void }) {
   const incidents = useData<Incident[]>('/incidents');
-  const [summary, setSummary] = useState('');
+  const [summary, setSummary] = useState<Briefing | null>(null);
   const [summaryError, setSummaryError] = useState('');
   const ranked = state.stations.flatMap(s => fuels.map(f => ({ station: s, fuel: f, ...s.fuels[f] }))).sort((a, b) => (b.risk || 0) - (a.risk || 0));
   const risks = ranked.slice(0, 5);
@@ -180,7 +180,7 @@ function Overview({ state, name, navigate }: { state: Network; name: (id: string
     { label: 'Open alerts', value: number(state.kpis.open_alerts), note: 'operational' },
     { label: 'Tanks at high risk', value: number(ranked.filter(r => (r.risk || 0) >= 0.5).length), note: `of ${ranked.length} station tanks` },
   ];
-  async function summarize() { try { setSummaryError(''); setSummary((await api<{ text: string }>('/summary')).text); } catch (e) { setSummaryError(String(e)); } }
+  async function summarize() { try { setSummaryError(''); setSummary(await api<Briefing>('/summary')); } catch (e) { setSummaryError(String(e)); } }
   return <>
     <div className="kpi-grid">{cards.map(c => <div key={c.label} className={`kpi ${c.highlight ? 'highlight' : ''}`}><span>{c.label}</span><div className="kpi-value"><strong>{c.value}</strong><small>{c.note}</small></div></div>)}</div>
     <div className="grid-main">
@@ -209,9 +209,9 @@ function Overview({ state, name, navigate }: { state: Network; name: (id: string
         <p className="fineprint">Tick mark: normal demand for this hour. Yellow: more than 15% above normal.</p>
       </Panel>
       <section className="panel assist-panel">
-        <div className="assist-top"><span className="tag ink"><Sparkles size={12} />Operations briefing</span><small>Grounded template</small></div>
+        <div className="assist-top"><span className="tag ink"><Sparkles size={12} />Operations briefing</span><small title={summary?.reason}>{summary?.source === 'llm' ? 'Written by Claude · numbers checked' : 'Grounded template'}</small></div>
         <h2>Every signal has a next step.</h2>
-        <p>{summary || 'Get a concise summary of service level, open alerts and allocations ready for review.'}</p>
+        <p>{summary?.text || 'Get a concise summary of service level, open alerts and allocations ready for review.'}</p>
         <button className="suggest" onClick={summarize}><span><small>Suggested action</small><strong>Summarize network</strong></span><i><ArrowRight size={16} /></i></button>
         {summaryError && <p className="error-text">{summaryError}</p>}
         <div className="assist-note"><ShieldCheck size={16} /><span>Crisis, cross-region and rationing moves always wait for a human operator.</span></div>

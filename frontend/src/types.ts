@@ -25,6 +25,7 @@ export type Supply = { id: string; depot_id: string; fuel_type: Fuel; quantity: 
 export type SimEvent = { id: number; type: string; start_tick: number; end_tick: number; status: string; parameters: Record<string, unknown> };
 export type Decision = { id: string; recommendation_id: string; run_id: string; status: string; actor: string; sim_id: number | null; failure_reason: string | null; created_at: string; request: { source_depot_id: string; destination_station_id: string; fuel_type: Fuel; quantity: number; route_id: string; idempotency_key: string } };
 export type Incident = { id: string; tick: number; text: string; source: string; severity: string };
+export type Briefing = { text: string; source: 'llm' | 'template'; model?: string; reason?: string };
 export type Health = { status: string; mode: string; version: string; git_sha: string; p95_latency_ms: number | null; error_rate: number | null; components: Record<string, { status: string; [key: string]: string | number | null }>; reason: string };
 export type Forecast = { start_tick: number; tick_minutes: number; mean: number[]; std: number[]; inventory_path: number[]; model_version: string; source: string; risk: number; hours_to_stockout: number | null; history: { tick: number; demand_liters: number; served_liters: number }[]; uncertainty_note: string };
 export type AuditEntry = { id: number; created_at: string; actor: string; action: string; target: string; details: Record<string, unknown> };

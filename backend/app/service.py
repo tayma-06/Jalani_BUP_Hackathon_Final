@@ -11,6 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import metrics
+from app.briefing import Briefing
 from app.config import Settings
 from app.db import (
     KEEP_HISTORY,
@@ -55,6 +56,7 @@ class FuelService:
         self.snapshot = None
         self.analysis = {}
         self.drift = DriftMonitor()
+        self.briefing = Briefing(settings)
         self.run_id = str(uuid4())
         self.fetched_at = 0.0
         self.stale = True
@@ -708,4 +710,4 @@ class FuelService:
                     "decision_engine": {"status": "healthy" if self.safe() else "blocked", "policy": self.policy_name,
                                         "last_cycle_ms": self.last_cycle_ms},
                     "event_stream": {"status": "connected" if self.stream_connected else "polling"},
-                    "llm": {"status": "disabled", "explanations": "grounded templates"}}}
+                    "llm": self.briefing.status()}}

@@ -51,6 +51,15 @@ It is used only as a BuildKit secret during `pip wheel` / `npm ci`. It is never 
 
 **The numbers reset to tick 0.** Someone reset the simulator. The backend starts a new run. Old decision history is kept, but old pending intents are never replayed.
 
+**The briefing says "Grounded template" even though `LLM_API_KEY` is set.** Hover over the label to see the reason. Then check the `llm` component on System health (or `/api/health`):
+
+| Reason | Fix |
+|---|---|
+| `status: disabled` | The backend didn't get the key. Put `LLM_API_KEY=...` in `.env`, then run `docker compose up -d backend`. |
+| `Claude API error 401` | The key is wrong or revoked. |
+| `Claude API unreachable or timed out` | No internet access, or antivirus/proxy TLS scanning is blocking `api.anthropic.com`. |
+| `Claude used numbers not in the data` | This is the safety check working. Try again on the next tick. |
+
 ## Monitoring
 
 **A Grafana panel says "No data".** Counters such as decisions and alerts only get values after the first event of that kind, so approve a shipment or inject an event. Check that Prometheus sees the backend: http://127.0.0.1:9090/targets should show `jalani-backend` as UP.

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App, { RecommendationCard } from './App';
 import { api, label, number, percent } from './api';
-import type { AuditEntry, Fuel, Network, Recommendation, Session } from './types';
+import type { AuditEntry, Briefing, Fuel, Network, Recommendation, Session } from './types';
 
 const fuelState = (inventory: number, risk: number) => ({ inventory, capacity: 15000, in_transit: 0, forecast_12h: 4000, hours_to_stockout: risk > 0.5 ? 2.5 : null, risk, risk_level: risk > 0.5 ? 'HIGH' : 'LOW' });
 const tankFuels = (inventory: number, risk: number) => ({ DIESEL: fuelState(inventory, risk), PETROL: fuelState(inventory, 0), OCTANE: fuelState(inventory, 0) }) as Record<Fuel, ReturnType<typeof fuelState>>;
@@ -41,6 +41,7 @@ const auditPage: AuditEntry[] = [
 type Call = { path: string; method: string; body?: unknown; auth?: string };
 let calls: Call[];
 let state: Network;
+let briefing: Briefing;
 const reply = (status: number, data: unknown) => Promise.resolve(new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }));
 
 function mockBackend(users: Record<string, [string, Session['role']]> = { operator: ['demo-operator', 'operator'] }) {
@@ -58,6 +59,7 @@ function mockBackend(users: Record<string, [string, Session['role']]> = { operat
     if (path === '/network/state') return reply(200, state);
     if (path === '/health') return reply(200, health);
     if (path === '/recommendations') return reply(200, [recommendation]);
+    if (path === '/summary') return reply(200, briefing);
     if (path.startsWith('/audit')) {
       const before = new URLSearchParams(path.split('?')[1] || '').get('before');
       return reply(200, before ? auditPage.slice(-1).map(e => ({ ...e, id: Number(before) - 1 })) : auditPage);
@@ -80,8 +82,34 @@ async function signIn(username: string, password: string) {
   return user;
 }
 
-beforeEach(() => { calls = []; state = network(); sessionStorage.clear(); mockBackend(); });
+beforeEach(() => {
+  calls = []; state = network(); sessionStorage.clear(); mockBackend();
+  briefing = { text: 'At tick 42, service level is 97.3%.', source: 'template' };
+});
 afterEach(() => { vi.unstubAllGlobals(); });
+
+describe('operations briefing', () => {
+  it('labels a Claude-written briefing', async () => {
+    briefing = { text: 'Service level is 97.3%. 1 proposal awaits review.', source: 'llm', model: 'claude-opus-5' };
+    renderApp();
+    const user = await signIn('operator', 'demo-operator');
+    await screen.findByText('Network overview');
+    expect(screen.getByText('Grounded template')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Summarize network/ }));
+    expect(await screen.findByText('Service level is 97.3%. 1 proposal awaits review.')).toBeInTheDocument();
+    expect(screen.getByText('Written by Claude · numbers checked')).toBeInTheDocument();
+  });
+
+  it('shows the template, with the reason, when Claude was unavailable', async () => {
+    briefing = { text: 'At tick 42, service level is 97.3%.', source: 'template', reason: 'Claude API unreachable or timed out' };
+    renderApp();
+    const user = await signIn('operator', 'demo-operator');
+    await screen.findByText('Network overview');
+    await user.click(screen.getByRole('button', { name: /Summarize network/ }));
+    expect(await screen.findByText('At tick 42, service level is 97.3%.')).toBeInTheDocument();
+    expect(screen.getByText('Grounded template')).toHaveAttribute('title', 'Claude API unreachable or timed out');
+  });
+});
 
 describe('formatting helpers', () => {
   it('formats litres, percentages and identifiers for operators', () => {

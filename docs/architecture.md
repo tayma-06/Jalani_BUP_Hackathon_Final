@@ -65,6 +65,12 @@ A simulator reset (detected by the tick or clock going backwards, a changed iden
 
 ## Deliberate choices
 
-- **No reinforcement learning, no separate ML service, no LLM.** The world is small, deterministic by seed and fully observable, so a transparent heuristic plus Monte Carlo risk is easier to verify and explain. `ML_SERVICE_URL` and `LLM_API_KEY` are empty by default, and explanations come from grounded templates.
+- **No reinforcement learning, no separate ML service.** The world is small, deterministic by seed and fully observable, so a transparent heuristic plus Monte Carlo risk is easier to verify and explain. `ML_SERVICE_URL` is empty by default.
+- **Claude writes words, never decisions.** With `LLM_API_KEY` set, Claude writes the Overview's plain-English operations briefing (`backend/app/briefing.py`):
+  - **Input:** only a small JSON of facts the engine already computed (KPIs, the most at-risk tanks, the top proposals, open alert messages).
+  - **Number check:** every number in its reply must match one of those facts, allowing rounding and fraction-to-percent. If one doesn't, or the call fails, times out or is refused, the grounded template is shown instead, with the reason.
+  - **Cost control:** results are cached per tick for 30 s.
+  - **Settings:** the default model is `claude-opus-5` at low effort, with server-side refusal fallback enabled.
+  - Forecasts, risk, allocation and approval never touch the LLM.
 - **One backend worker.** Execution is serialized by an in-process lock. Scaling out would need a DB-backed execution lease.
 - **Single host.** Compose gives a short replacement interruption, not high availability.

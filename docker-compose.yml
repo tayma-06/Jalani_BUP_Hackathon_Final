@@ -63,7 +63,12 @@ services:
       GIT_SHA: ${GIT_SHA:-dev}
       ML_SERVICE_URL: ${ML_SERVICE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-opus-5}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      # The same optional extra root as the build (empty by default), for antivirus TLS scanning.
+      LLM_CA_FILE: /run/secrets/extra_ca
       ALERT_WEBHOOK_TOKEN: ${ALERT_WEBHOOK_TOKEN:-demo-alert-webhook-token}
+    secrets: [extra_ca]
     ports: ['127.0.0.1:8080:8080']
     depends_on:
       db: {condition: service_healthy}

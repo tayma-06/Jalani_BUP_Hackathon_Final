@@ -9,6 +9,7 @@ Jalani is a control room for the BUP hackathon's fuel-supply simulator.
 - **Recommends** shipments that respect every limit (depot stock, route capacity, tank space, dispatch budget). Each one comes with its reasons and alternatives.
 - **Waits for a human.** An operator approves each shipment, and every decision is audited. A double click can never send two trucks.
 - **Fails safe.** If the simulator or database breaks, Jalani keeps showing the last good data, blocks new shipments, and recovers on its own.
+- **Explains itself in plain English.** With an Anthropic API key, **Claude** writes the Overview's operations briefing from the numbers Jalani already computed. Every number Claude writes is checked against that data. If one doesn't match, or Claude is unavailable, the template is shown instead. Claude never makes or changes a decision.
 - **Watches itself.**
   - Raises a **forecast drift** alert when its predictions are consistently off.
   - Flags **unexplained inventory changes** that no sale or delivery accounts for.
@@ -216,9 +217,9 @@ Measured against the official simulator. Full method and limitations are in the 
 ```bash
 pip install -r backend/requirements-dev.lock
 python -m ruff check backend
-PYTHONPATH=backend python -m pytest backend/tests        # 73 backend tests
+PYTHONPATH=backend python -m pytest backend/tests        # 82 backend tests
 python -m unittest discover -s tests_ci                  # 22 CI/CD automation tests
-cd frontend && npm ci && npm run lint && npm run typecheck && npm run test:ci && npm run build   # 17 tests
+cd frontend && npm ci && npm run lint && npm run typecheck && npm run test:ci && npm run build   # 19 tests
 ```
 
 On Linux, macOS or WSL, `make test` runs all of these; `make help` lists every target.
@@ -291,8 +292,10 @@ All settings are optional environment variables with demo defaults; see [.env.ex
 | `ALERT_WEBHOOK_TOKEN` | demo value | Shared secret between Alertmanager and the backend |
 | `GRAFANA_ADMIN_PASSWORD` | `demo-grafana` | Grafana admin login |
 | `CHAOS_ENABLED` | `false` | Demo-only crash / corrupt-response buttons |
-| `ML_SERVICE_URL`, `LLM_API_KEY` | empty | Optional; empty means the local statistical forecast and template explanations |
-| `EXTRA_CA_FILE` | none | Only needed behind TLS-scanning antivirus or proxies |
+| `LLM_API_KEY` | empty | Anthropic API key. Set it and Claude writes the Overview briefing, with numbers checked; empty means the grounded template |
+| `LLM_MODEL` | `claude-opus-5` | Claude model for the briefing |
+| `ML_SERVICE_URL` | empty | Optional; empty means the local statistical forecast |
+| `EXTRA_CA_FILE` | none | Only needed behind TLS-scanning antivirus or proxies; used for builds and for the backend's calls to Claude |
 
 ## Documentation
 

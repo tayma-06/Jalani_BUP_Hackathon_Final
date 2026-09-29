@@ -218,7 +218,7 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
         # Reported per scrape, not per refresh, so a fallback stays visible even while the
         # simulator is unreachable and the refresh loop is failing.
         metrics.fallback.labels("prediction_service").set(0 if config.ml_service_url else 1)
-        metrics.fallback.labels("explanations").set(0 if config.llm_api_key else 1)
+        metrics.fallback.labels("explanations").set(0 if service.briefing.enabled else 1)
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.post("/api/internal/alerts")
@@ -401,12 +401,8 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
         state = service.network()
         if not service.snapshot:
             return {"text": "Waiting for simulator data. No operational conclusions are available.", "source": "template"}
-        kpi = state["kpis"]
-        return {"text": f"At tick {state['tick']}, service level is {kpi['service_level']:.1%}. "
-                        f"Unmet demand is {kpi['unmet_liters']:,.0f} L. {kpi['open_alerts']} alerts are open and "
-                        f"{kpi['pending_recommendations']} allocation proposals await review. "
-                        f"System mode: {state['mode'].lower()}. All figures describe the simulated environment.",
-                "source": "template"}
+        # Claude only rewords computed facts; its numbers are checked, else the template is used.
+        return await service.briefing.summarize(state, service.recommendations, service.alerts)
 
     @app.get("/api/settings/autopilot")
     async def get_autopilot(claims=Depends(user)):

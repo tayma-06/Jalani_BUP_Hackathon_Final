@@ -30,7 +30,13 @@ class Settings(BaseSettings):
     chaos_enabled: bool = False
     background_enabled: bool = True
     stream_enabled: bool = True
+    # Anthropic API key for the operations briefing. Empty keeps the grounded template.
     llm_api_key: str = ""
+    llm_model: str = "claude-opus-5"
+    llm_base_url: str = ""
+    llm_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    # Optional extra root CA (PEM) for TLS-inspecting antivirus/proxies; empty file is ignored.
+    llm_ca_file: str = ""
     ml_service_url: str = ""
     # Shared secret for the Alertmanager webhook. Alertmanager cannot present a user token,
     # so this is compared in constant time instead of going through the normal login flow.

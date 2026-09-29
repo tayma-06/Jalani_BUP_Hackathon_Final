@@ -33,6 +33,7 @@ Use only measured numbers from `docs/benchmark.md`, `docs/load-test.md` and `art
 ## Likely questions
 
 - **Why not machine learning / RL?** The world is small, seeded and fully visible. A transparent forecast with Monte Carlo risk is easier to verify and explain, and the benchmark compares it with simple baselines on the same seed.
+- **Do you use an LLM?** Yes, but only for words, never decisions. Claude writes the Overview briefing from numbers our engine already computed. We check every number it writes against our data; if one doesn't match, or Claude is unavailable, the app shows the template. Click **Summarize network** to show it: the label says "Written by Claude · numbers checked".
 - **What if the backend crashes mid-shipment?** The shipment intent is saved before it is sent, with a fixed idempotency key. On restart, the backend matches it against the simulator's ledger instead of sending it again.
 - **Can it run on its own?** Yes, in `auto` mode for routine, high-confidence proposals only. Crisis, cross-region and rationing moves always wait for a human.
 - **How do you know it's healthy?** The System health page, `/api/health`, Prometheus alerts and the Grafana dashboard.

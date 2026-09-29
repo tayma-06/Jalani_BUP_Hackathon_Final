@@ -15,6 +15,8 @@ confidence = Histogram("recommendation_confidence", "Heuristic confidence")
 recommendations = Counter("recommendations_total", "Recommendation changes", ["status"])
 executions = Counter("decisions_executed_total", "Accepted shipments", ["mode"])
 fallback = Gauge("fallback_active", "Local fallback in use instead of an optional service", ["component"])
+briefings = Counter("briefings_total", "Generated operations briefings: llm shown, or fallback to template",
+                    ["outcome"])
 review = Counter("human_review_requests_total", "Consequential plans queued")
 alerts = Counter("shortage_alerts_total", "New alerts", ["severity"])
 inventory = Gauge("station_inventory_liters", "Station fuel", ["station", "fuel"])

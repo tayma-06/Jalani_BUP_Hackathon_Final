@@ -8,8 +8,9 @@ from tests.fake_simulator import FakeSimulator
 
 @pytest.fixture
 def config(tmp_path):
-    return Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}", background_enabled=False, stream_enabled=False,
-                    retry_base_seconds=0, breaker_seconds=0.01, monte_carlo_paths=60)
+    # Ignore a developer's .env (e.g. changed demo passwords) so tests always use the documented defaults.
+    return Settings(_env_file=None, database_url=f"sqlite:///{tmp_path / 'test.db'}", background_enabled=False,
+                    stream_enabled=False, retry_base_seconds=0, breaker_seconds=0.01, monte_carlo_paths=60)
 
 
 @pytest.fixture

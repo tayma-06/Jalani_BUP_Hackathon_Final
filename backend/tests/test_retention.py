@@ -145,6 +145,22 @@ async def test_expired_recommendations_are_capped(service, fake):
     assert expired <= KEEP_RECOMMENDATIONS
 
 
+async def test_rejections_survive_pruning_for_the_cooldown_but_are_capped(service, fake):
+    # The rejection cooldown reads this run's REJECTED rows, so pruning must keep the newest.
+    with service.db.session() as session:
+        session.add_all([Recommendation(run_id=service.run_id, created_tick=i, status="REJECTED",
+                                        payload={"station_id": "station-test", "fuel_type": "DIESEL"})
+                         for i in range(KEEP_RECOMMENDATIONS + 40)])
+        session.commit()
+    advance(fake, 1)
+    await service.refresh()
+    with service.db.session() as session:
+        kept = session.scalars(select(Recommendation.created_tick).where(
+            Recommendation.run_id == service.run_id, Recommendation.status == "REJECTED")).all()
+    assert len(kept) == KEEP_RECOMMENDATIONS
+    assert min(kept) == 40
+
+
 async def test_history_cache_survives_a_refresh_without_rereading_the_database(service, fake):
     for _ in range(3):
         advance(fake, 1)

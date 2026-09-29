@@ -13,7 +13,24 @@ from pathlib import Path
 PACK = Path(__file__).resolve().parents[1]
 
 
-@unittest.skipUnless(os.name == 'posix', 'Linux shell deployment tests require POSIX paths, symlinks and flock')
+def symlinks_available():
+    """The release layout under test is a POSIX symlink chain.
+
+    Windows only grants symlink creation to elevated or developer-mode processes, so
+    these assertions genuinely cannot run there. Probing is better than skipping on
+    the platform name, which would also hide a broken Linux setup.
+    """
+    with tempfile.TemporaryDirectory() as probe:
+        try:
+            (Path(probe) / 'target').mkdir()
+            (Path(probe) / 'link').symlink_to(Path(probe) / 'target', target_is_directory=True)
+        except OSError:
+            return False
+    return True
+
+
+@unittest.skipUnless(os.name == 'posix' and symlinks_available(),
+                     'Linux shell deployment tests require POSIX paths, symlinks and flock')
 class DeploymentTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

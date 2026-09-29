@@ -9,6 +9,11 @@ Jalani is a control room for the BUP hackathon's fuel-supply simulator.
 - **Recommends** shipments that respect every limit (depot stock, route capacity, tank space, dispatch budget). Each one comes with its reasons and alternatives.
 - **Waits for a human.** An operator approves each shipment, and every decision is audited. A double click can never send two trucks.
 - **Fails safe.** If the simulator or database breaks, Jalani keeps showing the last good data, blocks new shipments, and recovers on its own.
+- **Watches itself.**
+  - Raises a **forecast drift** alert when its predictions are consistently off.
+  - Flags **unexplained inventory changes** that no sale or delivery accounts for.
+  - Keeps every allocation-policy change as a **version you can roll back**.
+  - Doesn't repeat a proposal an operator just **rejected**, unless the risk gets clearly worse.
 
 Everything shown is a **simulated environment**. No real infrastructure is controlled.
 
@@ -211,7 +216,7 @@ Measured against the official simulator. Full method and limitations are in the 
 ```bash
 pip install -r backend/requirements-dev.lock
 python -m ruff check backend
-PYTHONPATH=backend python -m pytest backend/tests        # 46 backend tests
+PYTHONPATH=backend python -m pytest backend/tests        # 73 backend tests
 python -m unittest discover -s tests_ci                  # 22 CI/CD automation tests
 cd frontend && npm ci && npm run lint && npm run typecheck && npm run test:ci && npm run build   # 17 tests
 ```
@@ -231,7 +236,7 @@ The backend tests cover the nine required behaviors in [docs/ci-contract.md](doc
 - reset scoping
 - human review and role checks
 
-They also cover alert-webhook delivery and data retention.
+They also cover alert-webhook delivery, data retention, policy versioning and rollback, inventory reconciliation, forecast drift, and the rejection cooldown.
 
 **Live checks** against a running stack. The ones marked ⚠ reset or disturb the simulator, so use them on a local or disposable stack only:
 

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     breaker_seconds: float = Field(default=10, gt=0)
     monte_carlo_paths: int = Field(default=300, ge=10, le=5000)
     horizon_hours: int = Field(default=12, ge=1, le=72)
+    rejection_cooldown_ticks: int = Field(default=8, ge=0, le=1000)
+    rejection_risk_margin: float = Field(default=0.15, ge=0, le=1)
     chaos_enabled: bool = False
     background_enabled: bool = True
     stream_enabled: bool = True

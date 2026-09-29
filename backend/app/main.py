@@ -163,6 +163,14 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
             raise HTTPException(403, "Administrator access required")
         return claims
 
+    async def _reason(request: Request) -> str:
+        """An optional operator-supplied justification, read without breaking typed bodies."""
+        try:
+            body = await request.json()
+        except ValueError:
+            return "unspecified"
+        return str(body.get("reason", "")).strip()[:300] or "unspecified"
+
     @app.post("/api/auth/login")
     async def login(body: Login, request: Request):
         address = request.client.host if request.client else "local"
@@ -419,17 +427,29 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
     async def get_policy(claims=Depends(user)):
         return {**service.policy, "version": service.policy_name}
 
+    @app.get("/api/policies")
+    async def policies(claims=Depends(user)):
+        return service.policy_registry()
+
     @app.post("/api/settings/policy")
-    async def set_policy(body: PolicySetting, claims=Depends(admin)):
+    async def set_policy(body: PolicySetting, request: Request, claims=Depends(admin)):
         async with service.lock:
-            policy = {**service.policy, **body.model_dump(exclude_none=True)}
-            with service.db.session() as session:
-                service.db.put_setting(session, "policy", policy)
-                audit(session, claims["sub"], "settings.policy", body.version, policy=policy)
-                session.commit()
-            service.policy, service.policy_name = policy, body.version
-            service.dirty.set()
-        return policy
+            service.db.check()
+            payload = await _reason(request)
+            config = {**service.policy, **body.model_dump(exclude_none=True)}
+            return service.activate_policy(body.version, config, claims["sub"], payload)
+
+    @app.post("/api/settings/policy/rollback")
+    async def revert_policy(request: Request, claims=Depends(admin)):
+        async with service.lock:
+            service.db.check()
+            try:
+                body = await request.json()
+            except ValueError:
+                body = {}
+            if not str(body.get("reason") or "").strip():
+                raise HTTPException(422, "A rollback needs a recorded reason")
+            return service.rollback_policy(claims["sub"], str(body["reason"])[:300], body.get("to_version"))
 
     async def control(path, payload, claims):
         async with service.lock:

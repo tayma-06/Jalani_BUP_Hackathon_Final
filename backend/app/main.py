@@ -50,14 +50,25 @@ class AutopilotSetting(BaseModel):
 
 
 class PolicySetting(BaseModel):
-    version: Literal["greedy_v1", "naive_reorder"]
+    version: Literal["greedy_v1", "naive_reorder", "lp_v1", "lp_ml_v1"]
     weights: dict[Literal["DIESEL", "PETROL", "OCTANE"], float] | None = None
+    optimiser: dict[str, float] | None = None
 
     @model_validator(mode="after")
     def valid_weights(self):
         if self.weights and (set(self.weights) != {"DIESEL", "PETROL", "OCTANE"}
                              or any(not 0.1 <= w <= 10 for w in self.weights.values())):
             raise ValueError("Supply three fuel weights between 0.1 and 10")
+        if self.optimiser is not None:
+            allowed = {"unmet_penalty", "priority_weight", "transport_weight", "late_penalty",
+                       "surplus_weight", "reserve_fraction", "horizon_hours", "max_arcs"}
+            unknown = set(self.optimiser) - allowed
+            if unknown:
+                raise ValueError(f"Unknown optimiser weights: {sorted(unknown)}")
+            if any(value < 0 for value in self.optimiser.values()):
+                raise ValueError("Optimiser weights are costs and cannot be negative")
+            if self.optimiser.get("reserve_fraction", 0) > 1:
+                raise ValueError("reserve_fraction is a fraction and cannot exceed 1")
         return self
 
 

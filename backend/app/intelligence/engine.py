@@ -12,6 +12,8 @@ CONFIG = Path(__file__).resolve().parents[2] / "config"
 PROFILES = yaml.safe_load((CONFIG / "profiles.yaml").read_text())
 POLICY = yaml.safe_load((CONFIG / "policy.yaml").read_text())
 ACTIVE = {"PENDING", "IN_TRANSIT"}
+# Policies solved by app.intelligence.optimize rather than the greedy loop.
+OPTIMIZER_POLICIES = {"lp_v1", "lp_ml_v1"}
 
 
 def inbound(snapshot, station_id, fuel):
@@ -118,7 +120,7 @@ def forecast(snapshot, station, fuel, hours=24, forecaster=None):
             observations = normalized_history(snapshot, station, fuel)
             return {"mean": [round(float(m), 2) for m in mean],
                     "std": [round(float(s), 2) for s in std],
-                    "model_version": f"ml-{forecaster.version}",
+                    "model_version": forecaster.version,
                     "source": f"trained ridge forecast {forecaster.version}",
                     "known": True, "history_rows": len(observations),
                     "history": [{"tick": row.tick, "litres_per_hour": round(value, 2)}
@@ -264,10 +266,95 @@ def validate_batch(snapshot, bodies, policy=None):
     return None
 
 
+def describe_shipment(snapshot, analysis, station, fuel, depot, route, quantity, eta, *,
+                      siblings=(), routes=(), policy=None, paths=300, cross_region=False,
+                      reserve=0.0, space=None, dispatch=None, rationing=False, target_hours=24,
+                      policy_name="greedy_v1", solver_note=None):
+    """One proposal in the shared recommendation schema, with independent impact figures.
+
+    Displayed impact never counts `siblings` (other unapproved proposals from this cycle);
+    the coordinated figure is reported separately under `plan`. Every policy routes through
+    this function so a solver-based plan is described exactly like a greedy one.
+    """
+    policy = policy or POLICY
+    a = analysis[(station.id, fuel)]
+    length = len(a["inventory_path"])
+
+    def whatif(q, arrival=eta, extra=()):
+        return project(station.inventory[fuel], station.capacity[fuel], a["mean"][:length],
+                       a["std"][:length], a["inbound"] + list(extra) + [(arrival, q)],
+                       snapshot.instance.tick, snapshot.instance.tick_minutes,
+                       seed_for(snapshot, station.id, fuel), paths)
+
+    before, after, half = whatif(0), whatif(quantity), whatif(quantity / 2)
+    crisis = any(e.status == "ACTIVE" and event_applies(e, station, depot, route) for e in snapshot.events)
+    score = max(0, 0.8 - 0.2 * crisis - 0.1 * cross_region - 0.1 * rationing)
+    review_reasons = []
+    if crisis:
+        review_reasons.append("crisis_event")
+    if cross_region:
+        review_reasons.append("cross_region_transfer")
+    if rationing:
+        review_reasons.append("network_rationing")
+    if score < 0.75:
+        review_reasons.append("low_confidence")
+    alternatives = [{"label": "Half shipment", "quantity": quantity / 2, "risk_after": half["risk"]},
+                    {"label": "Do nothing", "quantity": 0, "risk_after": before["risk"]}]
+    depots = {d.id: d for d in snapshot.depots}
+    for other in routes:
+        if other.id == route.id:
+            continue
+        alt = {"idempotency_key": "what-if", "source_depot_id": other.source_depot_id,
+               "destination_station_id": station.id, "route_id": other.id,
+               "fuel_type": fuel, "quantity": quantity}
+        if not validate_batch(snapshot, [alt], policy):
+            alt_risk = whatif(quantity, snapshot.instance.tick + 1 + other.transit_ticks)
+            alternatives.append({"label": f"Via {depots[other.source_depot_id].name}",
+                                 "route_id": other.id, "risk_after": alt_risk["risk"]})
+            break
+    plan = whatif(quantity, extra=list(siblings))
+    return {
+        "created_tick": snapshot.instance.tick, "station_id": station.id, "fuel_type": fuel,
+        "current_inventory": station.inventory[fuel], "projected_stockout_hours": a["hours_to_stockout"],
+        "expected_demand_12h": a["forecast_12h"],
+        "action": {"source_depot_id": depot.id, "route_id": route.id, "quantity": quantity, "eta_tick": eta},
+        "impact": {"risk_before": before["risk"], "risk_after": after["risk"],
+                   "unmet_before_l": before["expected_unmet_liters"], "unmet_after_l": after["expected_unmet_liters"],
+                   "basis": "This shipment only. Sibling proposals are excluded and listed under plan."},
+        "confidence": {"score": round(score, 2), "level": "HIGH" if score >= 0.75 else "MEDIUM" if score >= 0.5 else "LOW"},
+        "requires_review": bool(review_reasons),
+        "review_reasons": review_reasons,
+        "rationing": rationing,
+        "plan": {"shipments_for_entity": 1 + len(siblings),
+                 "sibling_proposals": len(siblings),
+                 "risk_after_all_approved": plan["risk"],
+                 "unmet_after_all_approved_l": plan["expected_unmet_liters"],
+                 "note": "Coordinated figures assume EVERY proposal for this station and fuel is approved. "
+                         "Each individual approval is validated on its own against live depot, dispatch, "
+                         "route and tank limits, so a partial approval ships less than shown here."},
+        "signals": [f"Model estimates {before['risk']:.0%} stockout risk over 12 hours.",
+                    f"Demand multiplier {station.demand_multiplier:.2f}; forecast source: {a['source']}.",
+                    "Rationing to spread limited supply." if rationing else f"Target cover: {target_hours} hours."],
+        "constraints": [f"Route limit {route.max_shipment:,.0f} L",
+                        f"Unreserved tank space {(space or {}).get((station.id, fuel), 0):,.0f} L",
+                        f"Dispatch available {(dispatch or {}).get(depot.id, 0):,.0f} L",
+                        f"Home-region reserve {reserve:,.0f} L"],
+        "alternatives": alternatives,
+        "explanation": f"Send {quantity:,.0f} L of {fuel.lower()} from {depot.name} to {station.name}. "
+                       f"Arrival at tick {eta}; estimated stockout risk {before['risk']:.0%} → {after['risk']:.0%}. "
+                       "Impact is a forecast, not a measured simulator outcome.",
+        "explanation_source": "template", "policy_version": policy_name, "model_version": a["model_version"],
+        "solver": solver_note,
+    }
+
+
 def recommend(snapshot, analysis, policy=None, paths=300, policy_name="greedy_v1"):
     policy = policy or POLICY
     if policy_name == "do_nothing":
         return []
+    if policy_name in OPTIMIZER_POLICIES:
+        from app.intelligence.optimize import optimize_recommend
+        return optimize_recommend(snapshot, analysis, policy, paths, policy_name)
     stock, dispatch, space = budgets(snapshot, policy)
     depots = {d.id: d for d in snapshot.depots}
     candidates = []
@@ -312,79 +399,11 @@ def recommend(snapshot, analysis, policy=None, paths=300, policy_name="greedy_v1
                 if quantity < policy["minimum_shipment"]:
                     break
                 eta = snapshot.instance.tick + 1 + route.transit_ticks
-                length = len(a["inventory_path"])
-
-                # Displayed impact is INDEPENDENT: only already-approved simulator shipments
-                # (pending / in transit) plus this single proposal are counted. Sibling
-                # proposals from the same cycle are unapproved, so they must never silently
-                # inflate this recommendation's benefit. They are reported separately.
-                def whatif(q, arrival=eta, siblings=()):
-                    return project(station.inventory[fuel], station.capacity[fuel], a["mean"][:length],
-                                   a["std"][:length], a["inbound"] + list(siblings) + [(arrival, q)],
-                                   snapshot.instance.tick, snapshot.instance.tick_minutes,
-                                   seed_for(snapshot, station.id, fuel), paths)
-
-                def coordinated(siblings):
-                    return project(station.inventory[fuel], station.capacity[fuel], a["mean"][:length],
-                                   a["std"][:length], a["inbound"] + list(siblings) + [(eta, quantity)],
-                                   snapshot.instance.tick, snapshot.instance.tick_minutes,
-                                   seed_for(snapshot, station.id, fuel), paths)
-
-                before, after, half = whatif(0), whatif(quantity), whatif(quantity / 2)
-                crisis = any(e.status == "ACTIVE" and event_applies(e, station, depot, route) for e in snapshot.events)
-                score = max(0, 0.8 - 0.2 * crisis - 0.1 * cross_region - 0.1 * rationing)
-                review_reasons = []
-                if crisis:
-                    review_reasons.append("crisis_event")
-                if cross_region:
-                    review_reasons.append("cross_region_transfer")
-                if rationing:
-                    review_reasons.append("network_rationing")
-                if score < 0.75:
-                    review_reasons.append("low_confidence")
-                alternatives = [{"label": "Half shipment", "quantity": quantity / 2, "risk_after": half["risk"]},
-                                {"label": "Do nothing", "quantity": 0, "risk_after": before["risk"]}]
-                for other in routes:
-                    other_depot = depots[other.source_depot_id]
-                    alt = {"idempotency_key": "what-if", "source_depot_id": other.source_depot_id,
-                           "destination_station_id": station.id, "route_id": other.id,
-                           "fuel_type": fuel, "quantity": quantity}
-                    if other.id != route.id and not validate_batch(snapshot, [alt], policy):
-                        alt_risk = whatif(quantity, snapshot.instance.tick + 1 + other.transit_ticks)
-                        alternatives.append({"label": f"Via {other_depot.name}", "route_id": other.id,
-                                             "risk_after": alt_risk["risk"]})
-                        break
-                plan = coordinated(extra_arrivals)
-                recommendation = {
-                    "created_tick": snapshot.instance.tick, "station_id": station.id, "fuel_type": fuel,
-                    "current_inventory": station.inventory[fuel], "projected_stockout_hours": a["hours_to_stockout"],
-                    "expected_demand_12h": a["forecast_12h"],
-                    "action": {"source_depot_id": depot.id, "route_id": route.id, "quantity": quantity, "eta_tick": eta},
-                    "impact": {"risk_before": before["risk"], "risk_after": after["risk"],
-                               "unmet_before_l": before["expected_unmet_liters"], "unmet_after_l": after["expected_unmet_liters"],
-                               "basis": "This shipment only. Sibling proposals are excluded and listed under plan."},
-                    "confidence": {"score": round(score, 2), "level": "HIGH" if score >= 0.75 else "MEDIUM" if score >= 0.5 else "LOW"},
-                    "requires_review": bool(review_reasons),
-                    "review_reasons": review_reasons,
-                    "rationing": rationing,
-                    "plan": {"shipments_for_entity": 1 + len(extra_arrivals),
-                             "sibling_proposals": len(extra_arrivals),
-                             "risk_after_all_approved": plan["risk"],
-                             "unmet_after_all_approved_l": plan["expected_unmet_liters"],
-                             "note": "Coordinated figures assume EVERY proposal for this station and fuel is approved. "
-                                     "Each individual approval is validated on its own against live depot, dispatch, "
-                                     "route and tank limits, so a partial approval ships less than shown here."},
-                    "signals": [f"Model estimates {before['risk']:.0%} stockout risk over 12 hours.",
-                                f"Demand multiplier {station.demand_multiplier:.2f}; forecast source: {a['source']}.",
-                                "Rationing to spread limited supply." if rationing else f"Target cover: {target_hours} hours."],
-                    "constraints": [f"Route limit {route.max_shipment:,.0f} L", f"Unreserved tank space {space[(station.id, fuel)]:,.0f} L",
-                                    f"Dispatch available {max(0, dispatch[depot.id]):,.0f} L", f"Home-region reserve {reserve:,.0f} L"],
-                    "alternatives": alternatives,
-                    "explanation": f"Send {quantity:,.0f} L of {fuel.lower()} from {depot.name} to {station.name}. "
-                                   f"Arrival at tick {eta}; estimated stockout risk {before['risk']:.0%} → {after['risk']:.0%}. "
-                                   "Impact is a forecast, not a measured simulator outcome.",
-                    "explanation_source": "template", "policy_version": policy_name, "model_version": a["model_version"],
-                }
+                recommendation = describe_shipment(
+                    snapshot, analysis, station, fuel, depot, route, quantity, eta,
+                    siblings=extra_arrivals, routes=routes, policy=policy, paths=paths,
+                    cross_region=cross_region, reserve=reserve, space=space, dispatch=dispatch,
+                    rationing=rationing, target_hours=target_hours, policy_name=policy_name)
                 planned.append(recommendation)
                 extra_arrivals.append((eta, quantity))
                 need -= quantity

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from http_checks import login, request, require
 
-POLICIES = ("do_nothing", "naive_reorder", "greedy_v1")
+POLICIES = ("do_nothing", "naive_reorder", "greedy_v1", "lp_v1")
 
 
 def post(base, path, token, body=None):
@@ -40,6 +40,7 @@ def run_policy(base, simulator, admin, operator, policy, ticks):
     require(instance.get("tick") == 0, "Simulator did not reset to tick 0")
 
     approved = rejected_by_gate = shipped_liters = 0
+    fallback_decisions = 0
     unmet_curve = []
     started = time.monotonic()
     for tick in range(1, ticks + 1):
@@ -47,6 +48,11 @@ def run_policy(base, simulator, admin, operator, policy, ticks):
         require(status == 200, f"step {tick} failed: HTTP {status} {data}")
         status, recs = post(base, "/api/decide?dry_run=false", operator)
         require(status == 200 and isinstance(recs, list), f"decision cycle failed at tick {tick}: {recs}")
+        # An LP decision that silently degraded to greedy must be visible, not averaged away.
+        for rec in recs:
+            solver = rec.get("solver") or {}
+            if solver.get("fallback_from"):
+                fallback_decisions += 1
         if policy != "do_nothing":
             for rec in [r for r in recs if r.get("status") == "PROPOSED"]:
                 status, result = post(base, f"/api/recommendations/{rec['id']}/approve", operator)
@@ -66,6 +72,7 @@ def run_policy(base, simulator, admin, operator, policy, ticks):
             "allocation_failures": final["allocation_failures"],
             "approved_shipments": approved, "approvals_blocked": rejected_by_gate,
             "approved_liters": round(shipped_liters, 1), "unmet_curve": unmet_curve,
+            "fallback_decisions": fallback_decisions,
             "wall_seconds": round(time.monotonic() - started, 1)}
 
 

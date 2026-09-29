@@ -4,3 +4,15 @@ reserve_hours: 12
 minimum_shipment: 500
 constrained_dispatch_factor: 0.5
 weights: {DIESEL: 1.3, PETROL: 1.0, OCTANE: 0.8}
+
+# Only used by the LP policies (`lp_v1`, `lp_ml_v1`); the greedy policies ignore this.
+# Costs are per litre and all are non-negative, which keeps the min-cost flow exact.
+optimiser:
+  horizon_hours: 12
+  unmet_penalty: 1000.0      # per litre left unserved
+  priority_weight: 25.0      # extra unmet cost per unit of fuel weight
+  transport_weight: 2.0      # per transit tick, per litre
+  late_penalty: 400.0        # per litre arriving after the projected stockout
+  surplus_weight: 1.0        # per litre shipped above the station's net need
+  reserve_fraction: 0.15     # home-region stock withheld from cross-region arcs
+  max_arcs: 200000

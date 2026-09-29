@@ -48,8 +48,13 @@ class ModelError(Exception):
 
 
 def model_checksum(artifact: dict) -> str:
-    """Deterministic sha256 over the canonical artifact JSON."""
-    return hashlib.sha256(json.dumps(artifact, sort_keys=True).encode()).hexdigest()
+    """Deterministic sha256 over the canonical artifact JSON, excluding `checksum` itself.
+
+    The field is removed before hashing so that storing the digest and then re-verifying it
+    (on load, on deploy, after a round-trip through the database) gives the same answer.
+    """
+    payload = {k: v for k, v in artifact.items() if k != "checksum"}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def data_fingerprint(records: Iterable[tuple[int, str, str, float]]) -> str:

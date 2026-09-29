@@ -10,7 +10,7 @@ SMOKE_USER ?= operator
 SMOKE_PASSWORD ?= demo-operator
 export GIT_SHA SMOKE_USER SMOKE_PASSWORD
 
-.PHONY: help up down logs ps test test-backend test-frontend test-ci lint lock smoke contract faults drill verify reset
+.PHONY: help up down logs ps test test-backend test-frontend test-ci lint lock smoke contract faults drill benchmark train-model verify reset
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -59,6 +59,13 @@ faults: ## DESTRUCTIVE: stale/unavailable fault injection and recovery
 
 drill: ## DESTRUCTIVE: approvals, duplicates, delivery, disruption, demand spike
 	$(PY) scripts/e2e_drill.py --base $(BASE) --simulator $(SIM) --allow-reset
+
+benchmark: ## DESTRUCTIVE: policy benchmark incl. the LP policies, on an isolated stack
+	$(PY) scripts/benchmark.py --base $(BASE) --simulator $(SIM) --policies do_nothing,naive_reorder,greedy_v1,lp_v1 \
+	  --ticks 192 --allow-reset --output artifacts/benchmark.json
+
+train-model: ## DESTRUCTIVE: train the demand-forecast model from simulator history
+	$(PY) scripts/train_forecast_model.py --simulator $(SIM) --collect-ticks 2400 --allow-reset --eval-rows 96
 
 verify: up contract smoke faults drill ## Full local verification with evidence in artifacts/
 

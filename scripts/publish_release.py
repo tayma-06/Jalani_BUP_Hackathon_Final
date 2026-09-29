@@ -36,6 +36,11 @@ bundle = Path("release-bundle")
 (bundle / "scripts").mkdir(parents=True, exist_ok=True)
 (bundle / "manifest.json").write_text(json.dumps(data, indent=2) + "\n")
 shutil.copy2("deploy/compose.yml", bundle / "compose.yml")
+# deploy/compose.yml mounts the monitoring config from ./observability, so the release has to
+# carry it. Without these the alertmanager and prometheus services start with no configuration.
+(bundle / "observability").mkdir(exist_ok=True)
+for name in ("prometheus.yml", "rules.yml", "alertmanager.yml", "alertmanager-entrypoint.sh"):
+    shutil.copy2(Path("observability") / name, bundle / "observability" / name)
 for name in ("deploy.sh", "rollback.sh", "host_smoke.py", "app_smoke.py", "http_checks.py", "manifest.py", "verify_images.py"):
     shutil.copy2(Path("scripts") / name, bundle / "scripts" / name)
 Path("artifacts").mkdir(exist_ok=True)

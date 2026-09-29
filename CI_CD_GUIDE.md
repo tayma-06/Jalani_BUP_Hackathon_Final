@@ -46,7 +46,7 @@ The tag job receives the image archive from the test job. It does **not** rebuil
 | `scripts/publish_release.py`, `scripts/manifest.py` | Publish tested bytes; enforce immutable release references |
 | `scripts/deploy.sh`, `scripts/rollback.sh` | Update or recover a host without resetting its simulator/database |
 | `deploy/compose.yml`, `deploy/host.env.example` | Runtime layout and required host configuration |
-| `observability/` | Prometheus scrape/alert rules and Grafana starter dashboard |
+| `observability/` | Prometheus scrape/alert rules, Alertmanager routing and the Grafana starter dashboard |
 | `loadtest/dashboard.js` | One meaningful authenticated application load test |
 | `tests_ci/` | Local tests of automation logic, including deployment failure control flow |
 
@@ -139,7 +139,7 @@ docker compose --project-name jalani --env-file /srv/jalani/.env \
 bash "$release/scripts/deploy.sh" /srv/jalani
 ```
 
-This bootstraps persistent dependencies once. Subsequent releases update backend/frontend with `--no-deps`, which avoids accidentally recreating the simulator. Its undocumented internal data path is not guessed in the Compose file.
+This bootstraps persistent dependencies once. Subsequent releases update backend/frontend with `--no-deps`, which avoids accidentally recreating the simulator. The deploy script also starts `alertmanager` and `prometheus`, because the release bundle carries the `observability/` configuration they need; a release without that directory is started without them, so a rollback to an older release still succeeds. Its undocumented internal data path is not guessed in the Compose file.
 
 The starter binds host interfaces to loopback. View the host's operator UI through SSH forwarding:
 
@@ -183,7 +183,7 @@ The starter has a short service replacement interruption. It is not high availab
 
 ## 10. Monitoring, load testing and judge evidence
 
-Add the `observability/` files to the application's local Compose stack once `/metrics` exists. They provide a starter service-health dashboard; extend it with the intelligence and fuel-network views from Prompt 8. `sim_up` must represent successful real `/v1/*` reads, not `/v1/health`. Prometheus scrape `up` and simulator `sim_up` are different measurements.
+Add the `observability/` files to the application's local Compose stack once `/metrics` exists. They provide a starter service-health dashboard, the alert rules, and an Alertmanager that posts firing alerts back into the application's alert list so a page and the in-app trail cannot disagree; extend it with the intelligence and fuel-network views from Prompt 8. `sim_up` must represent successful real `/v1/*` reads, not `/v1/health`. Prometheus scrape `up` and simulator `sim_up` are different measurements.
 
 Run the included dashboard load test against **your app**, not directly against the simulator:
 

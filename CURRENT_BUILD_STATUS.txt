@@ -1,14 +1,26 @@
-JALANI - CURRENT BUILD SNAPSHOT
+﻿JALANI - CURRENT BUILD STATUS (29 September 2026)
 
-Created backend and frontend source, configuration, dependency manifest and behavioral tests are included alongside the original planning and CI/CD pack.
+Selected final deployment: LOCAL DOCKER.
+Start: docker compose up -d --build --wait
+App: http://localhost:3000 (credentials and configuration in README.md).
 
-Verification at export:
-- Frontend TypeScript check: passed.
-- Frontend ESLint check: passed.
-- Backend tests: not completed. Initial collection hit an environment SOCKS proxy dependency issue.
-- Official simulator/Docker integration: not run (Docker unavailable).
-- GitHub push: not performed; connected account cannot access the repository.
+Current source checks before monitoring integration fixes:
+- Backend: ruff passed; 33 tests passed.
+- Frontend: type checking passed; 17 tests passed.
+- Automation on Windows: 11 passed, 5 symlink creation errors. Full Linux run pending.
+- Timed rehearsal script prepared and linted: scripts/timed_rehearsal.py.
 
-This is a work-in-progress snapshot, not a verified final submission. Root Docker Compose, environment template, backend dependency locks, frontend behavioral tests, load-test results, benchmark evidence, and final run documentation remain unfinished.
+Current verification in progress:
+- Rebuild/restart, running audit/webhook routes, and exact build identity.
+- Prometheus -> Alertmanager -> application firing and resolution.
+- Source commit/push, GitHub Actions and release verification.
+- Timed machine rehearsal and local update/rollback checks.
 
-New source: backend/app/, backend/config/, backend/tests/, frontend/, pyproject.toml.
+Archived evidence is available for simulator contract, smoke, fault recovery,
+shipment delivery, policy comparison, load testing and browser/dashboard review.
+Those records describe their original build; they do not prove this rebuild passed.
+
+Not measured: forecast accuracy/calibration, live DB-outage drill, human speaking
+rehearsal/backup video. Remote SSH hosting is optional and outside local delivery.
+
+Details: docs/validation-status.md and docs/evidence-checklist.md.

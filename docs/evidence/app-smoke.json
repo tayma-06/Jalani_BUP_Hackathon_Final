@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "git_sha": "local-verify",
+  "mode": "NORMAL",
+  "station_count": 4,
+  "tick": 10,
+  "recommendation_count": 0,
+  "data_age_s": 0.92
+}

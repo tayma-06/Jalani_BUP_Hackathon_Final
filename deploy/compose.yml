@@ -47,6 +47,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      ALERT_WEBHOOK_TOKEN: ${ALERT_WEBHOOK_TOKEN:?required}
     ports: ['127.0.0.1:8080:8080']
     depends_on:
       db: {condition: service_healthy}
@@ -61,5 +62,37 @@ services:
     logging:
       driver: json-file
       options: {max-size: '10m', max-file: '3'}
+  # A host without these can still serve traffic, but its alerts fire into a void and the
+  # evidence for an incident is lost, so they ship with the release.
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
+    environment:
+      # Must equal the backend's ALERT_WEBHOOK_TOKEN or every delivery is rejected.
+      ALERT_WEBHOOK_TOKEN: ${ALERT_WEBHOOK_TOKEN:?required}
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./observability/alertmanager-entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - alertmanager-data:/alertmanager
+    ports: ['127.0.0.1:9093:9093']
+    depends_on: [backend]
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
+    ports: ['127.0.0.1:9090:9090']
+    depends_on: [alertmanager]
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
 volumes:
   pgdata:
+  prometheus-data:
+  alertmanager-data:

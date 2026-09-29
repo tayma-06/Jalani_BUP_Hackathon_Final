@@ -1,0 +1,50 @@
+{
+  "status": "passed",
+  "proposal": {
+    "tick": 20,
+    "count": 1,
+    "station": "station-tongi",
+    "fuel": "DIESEL",
+    "quantity": 3849,
+    "route": "route-gazipur-tongi",
+    "risk_before": 0.42333333333333334,
+    "risk_after": 0.0
+  },
+  "roles": "viewer approve 403, operator control 403",
+  "over_limit": "quantity+1 rejected with 422",
+  "duplicate_approval": {
+    "http": [
+      200,
+      200
+    ],
+    "executions": 1,
+    "simulator_allocations": 1,
+    "idempotency_key": "jal-2dfd0511-40bf-4b1a-81e7-335dfa98040e-db2f30cc-b5b1-466c-9e39-231e5b4b6656"
+  },
+  "shipment": {
+    "status_sequence": [
+      "IN_TRANSIT",
+      "ARRIVED"
+    ],
+    "final": "ARRIVED",
+    "in_decision_history": true
+  },
+  "route_disruption": {
+    "route": "route-gazipur-tongi",
+    "status": "DISRUPTED",
+    "proposals_avoiding_route": 1
+  },
+  "demand_spike": {
+    "new_alerts": 3,
+    "types": [
+      "regional_shortage",
+      "shortage"
+    ]
+  },
+  "final": {
+    "tick": 26,
+    "mode": "NORMAL",
+    "service_level": 1.0
+  },
+  "duration_seconds": 4.6
+}

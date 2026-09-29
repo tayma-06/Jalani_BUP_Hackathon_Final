@@ -1,5 +1,7 @@
 # Independent advanced-work verification
 
+> **Superseded.** These failures were fixed before `feature/advanced-completion` was pushed. That branch alone passed 50/50 backend tests. After it was merged into `main`, the combined suite passed **73/73** on Python 3.11 (Linux) and 3.14 (Windows). See the merge note in [advanced-work-status.md](advanced-work-status.md).
+
 Checked 29 September 2026 against the working checkout. This is a test observation,
 not a claim that the advanced work is complete. Another process was changing
 `backend/app/intelligence/engine.py` during the review; rerun after edits settle.

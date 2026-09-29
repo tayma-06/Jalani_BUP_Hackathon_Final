@@ -4,3 +4,31 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # These Docker entries are what keep the digest pins current. Dependabot opens a pull
+  # request with the new digest; the pin is only updated once that pull request is reviewed
+  # and merged, so a base image never moves without a human reading the change.
+  - package-ecosystem: docker
+    directory: /docker/backend.Dockerfile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: docker
+    directory: /docker/frontend.Dockerfile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: docker
+    directory: /docker-compose.yml
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: docker
+    directory: /compose.ci.yml
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: docker
+    directory: /deploy/compose.yml
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2

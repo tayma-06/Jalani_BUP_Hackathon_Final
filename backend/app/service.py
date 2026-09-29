@@ -7,12 +7,14 @@ from collections import deque
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import metrics
+from app.briefing import Briefing
 from app.config import Settings
 from app.db import (
+    KEEP_HISTORY,
     Alert,
     Database,
     DemandObservation,
@@ -55,6 +57,7 @@ class FuelService:
         self.snapshot = None
         self.analysis = {}
         self.drift = DriftMonitor()
+        self.briefing = Briefing(settings)
         self.run_id = str(uuid4())
         self.fetched_at = 0.0
         self.stale = True
@@ -82,6 +85,13 @@ class FuelService:
         self.errors = deque(maxlen=1000)
         self.last_cycle_ms = None
         self.last_saved_tick = -100
+        self.last_pruned_tick = -100
+        # Demand history that has scrolled out of the simulator's per-request window. Seeded
+        # from the database once per run, then kept in memory so a refresh does not re-read
+        # and re-deserialise the whole window on every tick.
+        self.history_cache = {}
+        self.history_saved = set()
+        self.history_run = None
 
     def event(self, name, **details):
         log.info(json.dumps({"event": name, "tick": self.snapshot.instance.tick if self.snapshot else None,
@@ -108,7 +118,9 @@ class FuelService:
             return
         runtime = self.db.setting("runtime", {})
         self.run_id = runtime.get("run_id", self.run_id)
-        row = self.db.last_snapshot()
+        # Scoped to this run: the newest snapshot overall may belong to a run that has since
+        # been reset, which would silently leave the operator with no cached view.
+        row = self.db.last_snapshot(self.run_id)
         if row and row.run_id == self.run_id:
             self.snapshot = Snapshot.model_validate(row.payload)
             self.analysis = analyse(self.snapshot, self.config.monte_carlo_paths,
@@ -133,17 +145,26 @@ class FuelService:
             self.forecaster = None
         if self.forecaster is not None:
             self.event("model.active", model=self.forecaster.version)
-            held_out = [e["mae"] for e in self.forecaster.evaluation if e.get("mae") is not None]
-            if held_out:
-                metrics.forecast_mae.labels(f"ml-{self.forecaster.version}").set(
-                    sum(held_out) / len(held_out))
+            metrics.fallback.labels("forecast").set(0)
         else:
-            metrics.forecast_mae.labels("profile_v1").set(0.0)
+            # No trained model in the registry: the statistical profile is in use, so this is
+            # a local fallback and must be visible on the same gauge the briefing uses.
+            # Per-model error is not a gauge here; it is persisted per prediction in
+            # ForecastEvaluation and served by /api/models/forecast/evaluations.
+            metrics.fallback.labels("forecast").set(1)
         return self.forecaster
 
     async def refresh(self):
         async with self.lock:
             return await self._refresh()
+
+    async def refresh_locked(self):
+        """Refresh while the caller already holds `self.lock`.
+
+        `asyncio.Lock` is not reentrant, so an HTTP handler that must refresh inside an
+        existing critical section uses this rather than `refresh()`, which would deadlock.
+        """
+        return await self._refresh()
 
     async def _refresh(self):
         start_time = time.monotonic()
@@ -174,32 +195,49 @@ class FuelService:
                 self.run_id = str(uuid4())
                 self.analysis = {}
                 self.last_saved_tick = -100
+                self.last_pruned_tick = -100
                 self.generation_uncertain = False
+                self.history_cache, self.history_saved, self.history_run = {}, set(), None
                 self.event("sim.reset_detected")
             self.reset_notice = False
             # Merge persisted history into the current run; IDs are only unique within a run.
             with self.db.session() as session:
-                known = {r.sim_id: r for r in session.scalars(select(DemandObservation).where(
-                    DemandObservation.run_id == self.run_id).order_by(DemandObservation.tick.desc()).limit(18000))}
-                merged = {key: value.payload for key, value in known.items()}
+                if self.history_run != self.run_id:
+                    self.history_cache = {
+                        row.sim_id: row.payload
+                        for row in session.scalars(
+                            select(DemandObservation)
+                            .where(DemandObservation.run_id == self.run_id)
+                            .order_by(DemandObservation.tick.desc())
+                            .limit(KEEP_HISTORY)
+                        )
+                    }
+                    self.history_saved = set(self.history_cache)
+                    self.history_run = self.run_id
                 station_map = {s.id: s for s in snapshot.stations}
                 for observation in snapshot.history:
-                    payload = observation.model_dump(mode="json")
                     station = station_map[observation.station_id]
+                    payload = observation.model_dump(mode="json")
+                    # Recomputed for the visible window every tick, because a demand event
+                    # starting or ending changes what counts as unexplained demand.
                     payload["demand_multiplier"] = historical_multiplier(snapshot, station, observation.tick)
-                    if observation.id not in known:
+                    self.history_cache[observation.id] = payload
+                    if observation.id not in self.history_saved:
                         session.add(DemandObservation(run_id=self.run_id, sim_id=observation.id,
                             tick=observation.tick, station_id=observation.station_id, fuel_type=observation.fuel_type,
                             demand=observation.demand_liters, payload=payload))
-                    merged[observation.id] = payload
-                if merged:
-                    snapshot = Snapshot.model_validate({**snapshot.model_dump(mode="json"), "history": list(merged.values())})
+                        self.history_saved.add(observation.id)
+                if len(self.history_cache) > KEEP_HISTORY:
+                    self.trim_history()
+                if self.history_cache:
+                    snapshot = Snapshot.model_validate(
+                        {**snapshot.model_dump(mode="json"), "history": list(self.history_cache.values())})
                 expected = max(0, snapshot.start_tick - max(since if not reset else 0, 0)) * len(snapshot.stations) * 3
                 recent = sum(since < h.tick <= snapshot.start_tick for h in snapshot.history) if not reset else 0
                 self.history_gap = expected > recent
                 ledger = {a.idempotency_key: a for a in snapshot.allocations}
                 unresolved = False
-                for execution in session.scalars(select(Execution)):
+                for execution in self.db.open_executions(session, self.run_id):
                     if execution.run_id != self.run_id:
                         if execution.status in {"UNKNOWN", "PREPARED", "PENDING", "IN_TRANSIT"}:
                             execution.status = "ABANDONED_RESET"
@@ -220,10 +258,16 @@ class FuelService:
                         unresolved = True
                 self.unresolved = unresolved
                 self.db.put_setting(session, "runtime", {"run_id": self.run_id, "tick": snapshot.instance.tick})
-                if snapshot.instance.tick - self.last_saved_tick >= 4 or reset or not previous:
+                # Saving a snapshot is the only thing that can push the snapshot table past its
+                # cap, so pruning always follows a write and additionally runs on its own cadence.
+                saved = snapshot.instance.tick - self.last_saved_tick >= 4 or reset or not previous
+                if saved:
                     session.add(SnapshotRecord(run_id=self.run_id, tick=snapshot.instance.tick,
                                                payload=snapshot.model_dump(mode="json")))
                     self.last_saved_tick = snapshot.instance.tick
+                if saved or snapshot.instance.tick - self.last_pruned_tick >= 8 or reset or not previous:
+                    self.db.prune(session, self.run_id)
+                    self.last_pruned_tick = snapshot.instance.tick
                 session.commit()
             analysis = await asyncio.to_thread(analyse, snapshot, self.config.monte_carlo_paths,
                                                self.config.horizon_hours, self.active_forecaster())
@@ -267,6 +311,16 @@ class FuelService:
             metrics.stale.set(int(not self.safe()))
         return False
 
+    def trim_history(self):
+        """Drop the oldest observations, keeping the same window every read would return."""
+        excess = len(self.history_cache) - KEEP_HISTORY
+        if excess <= 0:
+            return
+        oldest = sorted(self.history_cache, key=lambda key: self.history_cache[key]["tick"])[:excess]
+        for key in oldest:
+            del self.history_cache[key]
+            self.history_saved.discard(key)
+
     def rejection_suppressed(self, rejected, plan, tick):
         """Why an identical proposal is not regenerated yet, or None when it may be.
 
@@ -302,6 +356,8 @@ class FuelService:
             for row in open_recs:
                 if row.run_id != self.run_id or tick - row.created_tick > 4 or row.payload["action"]["route_id"] not in valid_routes:
                     row.status = "EXPIRED"
+            # Expiring the backlog above can overshoot the retention cap, so re-apply it here.
+            self.db.prune(session, self.run_id)
             # One open proposal per station and fuel. `recommend` may emit several shipments
             # for the same pair, so the set is updated as proposals are accepted; otherwise a
             # second proposal for the same tank would be persisted alongside the first.
@@ -351,8 +407,15 @@ class FuelService:
                         "source": "template", "severity": item["severity"]}))
                     metrics.alerts.labels(item["severity"]).inc()
             for row in session.scalars(select(Alert).where(Alert.run_id == self.run_id)):
+                # Prometheus owns its own firing/resolved lifecycle. Older installations
+                # may have stored these rows under the current simulator run.
+                if row.payload.get("source") == "prometheus":
+                    continue
                 if row.id not in seen and tick - row.payload["last_tick"] >= 4:
                     row.status = "RESOLVED"
+            # Alerts and incidents are written after the prune above, so re-apply the caps to
+            # keep a long-lived run from exceeding them by one cycle's worth of rows.
+            self.db.prune(session, self.run_id)
             session.commit()
 
     def load_views(self):
@@ -360,8 +423,17 @@ class FuelService:
             self.recommendations = [{**r.payload, "id": r.id, "run_id": r.run_id, "status": r.status}
                 for r in session.scalars(select(Recommendation).where(Recommendation.run_id == self.run_id)
                                         .order_by(Recommendation.created_tick.desc()).limit(200))]
-            self.alerts = [{**r.payload, "id": r.id, "status": r.status} for r in session.scalars(
-                select(Alert).where(Alert.run_id == self.run_id))]
+            self.alerts = []
+            for row in session.scalars(
+                    select(Alert).where(or_(Alert.run_id == self.run_id, Alert.run_id == "monitoring"))):
+                view = {**row.payload, "id": row.id, "status": row.status}
+                # Every alert exposes the same label set, so callers never branch on the
+                # original source: Prometheus alerts carry labels already, simulator alerts
+                # fall back to the fields the legacy Alerts page rendered.
+                view["labels"] = row.payload.get("labels") or {
+                    "alertname": row.payload.get("type") or row.payload.get("alertname") or "UnknownAlert",
+                    "severity": row.payload.get("severity", "none")}
+                self.alerts.append(view)
             self.incidents = [{"id": r.id, **r.payload} for r in session.scalars(
                 select(Incident).where(Incident.run_id == self.run_id))][-50:][::-1]
             self.decisions = [self.execution_json(r) for r in session.scalars(
@@ -660,12 +732,13 @@ class FuelService:
                                   "data_age_s": current["data_age_s"],
                                   "circuit": "open" if self.client.open_until > time.monotonic() else "closed"},
                     "prediction_service": {"status": "healthy",
-                                           "model": f"ml-{self.forecaster.version}" if self.forecaster else "profile_v1",
+                                           "model": self.forecaster.version if self.forecaster else "profile_v1",
                                            "kind": "trained ridge forecast" if self.forecaster else "local statistical forecast",
                                            "registry_note": self.forecaster_error or None},
                     "decision_engine": {"status": "healthy" if self.safe() else "blocked", "policy": self.policy_name,
                                         "last_cycle_ms": self.last_cycle_ms},
                     "event_stream": {"status": "connected" if self.stream_connected else "polling"},
-                    "llm": {"status": "configured" if self.config.groq_api_key else "disabled",
-                            "provider": "groq", "model": self.config.groq_model,
-                            "explanations": "read-only assistant with template fallback"}}}
+                    "llm": self.briefing.status(),
+                    "assistant": {"status": "configured" if self.config.groq_api_key else "disabled",
+                                  "provider": "groq", "model": self.config.groq_model,
+                                  "explanations": "read-only assistant with template fallback"}}}

@@ -1,0 +1,32 @@
+# Alert routing for the Jalani stack. Without a receiver, Prometheus logs alerts that nobody
+# ever sees; this gives every rule a destination and keeps the demo offline-safe.
+global:
+  resolve_timeout: 5m
+
+route:
+  # Group by shared labels so one operator gets one notification, not one per station.
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: default
+
+receivers:
+  - name: default
+    # Alerts land in the same durable store the operators already read, so a page and the
+    # in-app alert list cannot disagree.
+    webhook_configs:
+      - url: http://backend:8080/api/internal/alerts
+        http_config:
+          authorization:
+            type: Bearer
+            # Replaced with the container's ALERT_WEBHOOK_TOKEN when Alertmanager starts, so
+            # the token is never committed and the receiver always matches the backend.
+            credentials: @@ALERT_WEBHOOK_TOKEN@@
+        send_resolved: true
+
+inhibit_rules:
+  # A critical outage already says the backend is down; do not also page on every symptom.
+  - source_matchers: [alertname=BackendUnavailable]
+    target_matchers: [severity=warning]
+    equal: [job]

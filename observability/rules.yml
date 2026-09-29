@@ -16,7 +16,25 @@ groups:
         for: 10s
         labels: {severity: warning}
         annotations: {summary: 'Data freshness gate is blocking allocation execution'}
+      # sim_allocation_failures is a gauge mirroring the simulator's own cumulative counter,
+      # so it must be compared with delta(); increase() assumes a counter and would be invalid.
       - alert: AllocationFailures
-        expr: increase(sim_allocation_failures[5m]) > 0
+        expr: delta(sim_allocation_failures[5m]) > 0
+        for: 1m
         labels: {severity: warning}
         annotations: {summary: 'Allocation failures increased; inspect route status and audit'}
+      - alert: OptionalServiceFallback
+        expr: fallback_active == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: 'Degraded mode: an optional prediction or explanation service is disabled'}
+      - alert: ServiceLevelDegraded
+        expr: sim_service_level < 0.95
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: 'Simulator service level below 95%; unmet demand is accumulating'}
+      - alert: ExecutionLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{handler!="/metrics"}[5m]))) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: 'Operator-facing API p95 above one second'}

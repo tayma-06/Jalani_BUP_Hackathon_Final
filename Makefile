@@ -44,7 +44,8 @@ lint: ## Backend and frontend linters only
 	cd frontend && npm run lint
 
 lock: ## Regenerate pinned Python 3.11 locks after editing backend/requirements*.txt
-	docker run --rm -v "$(CURDIR)/backend:/w" -w /w python:3.11-slim sh -c \
+	docker run --rm -v "$(CURDIR)/backend:/w" -w /w \
+	  $(if $(EXTRA_CA_FILE),-v "$(abspath $(EXTRA_CA_FILE)):/ca.pem:ro" -e PIP_CERT=/ca.pem) python:3.11-slim sh -c \
 	  "pip install -q pip-tools && pip-compile -q --strip-extras --no-header --allow-unsafe -o requirements.lock requirements.txt \
 	   && pip-compile -q --strip-extras --no-header --allow-unsafe -o requirements-dev.lock requirements-dev.txt"
 

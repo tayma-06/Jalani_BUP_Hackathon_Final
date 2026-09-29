@@ -29,7 +29,8 @@ def symlinks_available():
     return True
 
 
-@unittest.skipUnless(symlinks_available(), 'POSIX symlinks are unavailable on this host')
+@unittest.skipUnless(os.name == 'posix' and symlinks_available(),
+                     'Linux shell deployment tests require POSIX paths, symlinks and flock')
 class DeploymentTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -110,6 +111,65 @@ out.write_text(json.dumps({'status':'passed','git_sha':manifest['git_sha']}))
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'docker-calls.jsonl').exists())
         self.assertEqual((self.root / 'current').resolve(), self.previous)
+
+    def docker_calls(self):
+        return [json.loads(line) for line in (self.root / 'docker-calls.jsonl').read_text().splitlines()]
+
+    def up_calls(self, release=None):
+        """The service list of each `docker compose up`, optionally for one release only."""
+        calls = []
+        for call in self.docker_calls():
+            if call[0] != 'compose' or 'up' not in call:
+                continue
+            if release is not None and not any(release in value for value in call):
+                continue
+            calls.append(call[call.index('up') + 1:])
+        return calls
+
+    def test_monitoring_ships_with_a_release_that_carries_its_config(self):
+        (self.candidate / 'observability').mkdir()
+        (self.candidate / 'observability' / 'alertmanager.yml').write_text('route: {}\n')
+        # The entrypoint substitutes the receiver token, so a release missing it would start
+        # Alertmanager against a config path that does not exist.
+        shutil.copy2(PACK / 'observability' / 'alertmanager-entrypoint.sh',
+                     self.candidate / 'observability' / 'alertmanager-entrypoint.sh')
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        started = self.up_calls()
+        self.assertTrue(started)
+        # A release that ships the config must also start the services that consume it.
+        self.assertIn('alertmanager', started[0])
+        self.assertIn('prometheus', started[0])
+
+    def test_rollback_target_without_monitoring_config_still_deploys(self):
+        (self.candidate / 'observability').mkdir()
+        (self.candidate / 'observability' / 'alertmanager.yml').write_text('route: {}\n')
+        result = self.invoke(dict(self.env, FAIL_CANDIDATE='1'))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual((self.root / 'current').resolve(), self.previous)
+        rollback = self.up_calls('/old/')
+        self.assertTrue(rollback)
+        # A release from before monitoring existed must not be asked for services it lacks.
+        self.assertNotIn('alertmanager', rollback[0])
+        self.assertIn('backend', rollback[0])
+
+
+class ReleaseConfigTests(unittest.TestCase):
+    def test_receiver_token_is_never_committed_and_is_required_by_the_deploy_stack(self):
+        config = (PACK / 'observability' / 'alertmanager.yml').read_text()
+        self.assertIn('@@ALERT_WEBHOOK_TOKEN@@', config)
+        self.assertNotIn('demo-alert-webhook-token', config)
+        deploy = (PACK / 'deploy' / 'compose.yml').read_text()
+        alertmanager = deploy[deploy.index('  alertmanager:'):deploy.index('  prometheus:')]
+        self.assertIn('ALERT_WEBHOOK_TOKEN: ${ALERT_WEBHOOK_TOKEN:?required}', alertmanager)
+        self.assertIn('alertmanager-entrypoint.sh', alertmanager)
+        self.assertIn('ALERT_WEBHOOK_TOKEN', (PACK / 'deploy' / 'host.env.example').read_text())
+
+    def test_publish_release_bundles_the_alertmanager_entrypoint(self):
+        # Publishing pushes images; this check only inspects the mandatory file list.
+        source = (PACK / 'scripts' / 'publish_release.py').read_text()
+        for name in ('alertmanager.yml', 'alertmanager-entrypoint.sh'):
+            self.assertIn(name, source, f'{name} is not bundled into the release')
 
 
 if __name__ == '__main__':

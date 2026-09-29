@@ -1,5 +1,26 @@
 # Advanced work status
 
+## Merge into `main` (29 September 2026)
+
+`feature/advanced-completion` (6934829) was merged into `main` on top of the later commits: the alerting pipeline, retention limits, audit log and README. Three files conflicted, and each was resolved by keeping both sides:
+
+- **`db.py`:** main's startup indexes plus this branch's migration ledger.
+- **`service.py`:** main's history trimming and pruning plus this branch's rejection cooldown.
+- **`tests_ci/test_deployment.py`:** skip unless the host is POSIX **and** symlinks are available.
+
+One behavior clash only appeared once the two sides were combined:
+- **The clash:** main's retention pruning deleted every non-open recommendation without an execution, so this run's `REJECTED` rows vanished and the cooldown could never suppress a repeat. `test_rejected_proposal_is_not_immediately_repeated` failed.
+- **The fix:** pruning now keeps the current run's rejections, capped at the newest `KEEP_RECOMMENDATIONS`.
+- **The guard:** `test_rejections_survive_pruning_for_the_cooldown_but_are_capped` covers it.
+
+Results after the merge:
+- Backend: ruff clean; **73 passed** on Python 3.11 (Linux container) and 3.14 (Windows).
+- `tests_ci`: **22 passed** on Linux. On Windows, the 5 deployment tests are skipped.
+
+The newly created `model_versions`, `drift_state`, `forecast_evaluations`, `agent_runs`, `app_events` and `leases` tables are not written by any code yet. Drift state is held in memory. Trained ML forecasting, the LLM assistant and the other items listed below remain unimplemented.
+
+---
+
 Branch: `feature/advanced-intelligence` (from `main` @ `1c0a765`)
 Environment: Windows 11, Python 3.12.10, Node 24.15.0, Docker Desktop 29.8.0.
 Official simulator used for integration work: `asifmahmoud414/bup-fuel-supply-simulator:1.0.0`

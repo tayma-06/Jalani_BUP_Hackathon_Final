@@ -12,6 +12,7 @@ Jalani is a control room for the organizers' fuel-supply simulator. It reads the
                  │  backend  (FastAPI, 1 worker, :8080) ──REST poll + SSE──▶ simulator :8000  │
                  │     │   │                                  (official image, unchanged)  │
                  │     │   └── /metrics ◀── prometheus :9090 ◀── grafana :3001              │
+                 │     │        └── alert rules ──▶ alertmanager :9093 ──▶ /api/internal/alerts
                  │     ▼                                                                    │
                  │  db  (PostgreSQL 16; SQLite for local dev/tests)                         │
                  └────────────────────────────────────────────────────────────────────────────┘
@@ -23,8 +24,8 @@ Jalani is a control room for the organizers' fuel-supply simulator. It reads the
 | Service loop | `backend/app/service.py` | Refresh on a 1 s poll or an SSE nudge; snapshot consistency check; reset detection; ledger reconciliation; mode (NORMAL / DEGRADED / RECOVERING) |
 | Intelligence | `backend/app/intelligence/engine.py` | Forecast, Monte Carlo risk, allocation policy, batch constraint validation, alert detection |
 | API | `backend/app/main.py` | JWT roles (viewer / operator / admin), health, metrics, approvals, admin control room |
-| Persistence | `backend/app/db.py` | Recommendations, execution intents, demand history, snapshots, alerts, incidents, audit log |
-| Frontend | `frontend/src/App.tsx` | Nine pages: overview, stations, recommendations, alerts, supply, forecasts, history, health, control room |
+| Persistence | `backend/app/db.py` | Recommendations, execution intents, demand history, snapshots, alerts, incidents, audit log. Every table is bounded by an explicit retention window applied after each write, so a deployment that runs for months does not grow without limit |
+| Frontend | `frontend/src/App.tsx` | Ten pages: overview, stations, recommendations, alerts, supply, forecasts, history, health, control room, audit log |
 
 ## Decision pipeline (every refresh)
 
@@ -64,6 +65,12 @@ A simulator reset (detected by the tick or clock going backwards, a changed iden
 
 ## Deliberate choices
 
-- **No reinforcement learning, no separate ML service, no LLM.** The world is small, deterministic by seed and fully observable, so a transparent heuristic plus Monte Carlo risk is easier to verify and explain. `ML_SERVICE_URL` and `LLM_API_KEY` are empty by default, and explanations come from grounded templates.
+- **No reinforcement learning, no separate ML service.** The world is small, deterministic by seed and fully observable, so a transparent heuristic plus Monte Carlo risk is easier to verify and explain. `ML_SERVICE_URL` is empty by default.
+- **Claude writes words, never decisions.** With `LLM_API_KEY` set, Claude writes the Overview's plain-English operations briefing (`backend/app/briefing.py`):
+  - **Input:** only a small JSON of facts the engine already computed (KPIs, the most at-risk tanks, the top proposals, open alert messages).
+  - **Number check:** every number in its reply must match one of those facts, allowing rounding and fraction-to-percent. If one doesn't, or the call fails, times out or is refused, the grounded template is shown instead, with the reason.
+  - **Cost control:** results are cached per tick for 30 s.
+  - **Settings:** the default model is `claude-opus-5` at low effort, with server-side refusal fallback enabled.
+  - Forecasts, risk, allocation and approval never touch the LLM.
 - **One backend worker.** Execution is serialized by an in-process lock. Scaling out would need a DB-backed execution lease.
 - **Single host.** Compose gives a short replacement interruption, not high availability.

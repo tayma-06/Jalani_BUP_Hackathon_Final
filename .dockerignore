@@ -12,3 +12,10 @@ docs
 data
 release-bundle
 *.zip
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+**/.pytest-tmp
+**/.ruff_cache

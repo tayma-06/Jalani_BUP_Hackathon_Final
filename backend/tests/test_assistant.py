@@ -31,6 +31,31 @@ async def test_groq_contract_and_no_execution(service, config, fake):
     assert len(calls) == 1
 
 
+async def test_uncited_answer_is_retried_once_then_accepted(service, config):
+    config.groq_api_key = "test-secret"
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        if len(calls) == 1:
+            return httpx.Response(200, json=completion(text="Briefing with no tags at all"))
+        return httpx.Response(200, json=completion(text="Briefing [network]"))
+    result = await OperationsAssistant(config, httpx.MockTransport(handler)).explain(service, AssistantRequest())
+    assert result["source"] == "ai" and len(calls) == 2
+    assert "no tags at all" not in result["explanation"]
+    assert calls[1]["messages"][-1]["role"] == "user" and "square brackets" in calls[1]["messages"][-1]["content"]
+
+
+async def test_persistently_uncited_answer_falls_back_after_one_retry(service, config):
+    config.groq_api_key = "test-secret"
+    calls = []
+    def handler(_):
+        calls.append(1)
+        return httpx.Response(200, json=completion(text="Still no tags"))
+    result = await OperationsAssistant(config, httpx.MockTransport(handler)).explain(service, AssistantRequest())
+    assert result["source"] == "template" and len(calls) == 2
+    assert "did not cite its sources" in result["fallback_reason"]
+
+
 @pytest.mark.parametrize("payload,status", [(completion(["invented"]), 200),
     (completion(text="No citation"), 200), (completion(finish="length"), 200),
     ({"choices": []}, 200), ({}, 429), ({}, 503)])

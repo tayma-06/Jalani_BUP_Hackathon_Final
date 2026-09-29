@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from app_smoke import smoke
-from http_checks import code
+from http_checks import TokenCache, code
 from manifest import env_text
 from simulator_contract import candidate
 from verify_images import check_revision
@@ -64,6 +64,12 @@ class CandidateTests(unittest.TestCase):
 
 
 class SmokeTests(unittest.TestCase):
+    def tokens(self):
+        # A cache primed with a token keeps the sign-in path out of these read-only checks.
+        cache = TokenCache()
+        cache._tokens[("http://test", "u")] = "test-token"
+        return cache
+
     def response(self, base, path, *args, **kwargs):
         payload = {"/": "<html>App</html>", "/api/health/live": {}, "/api/health/ready": {},
                    "/api/health": {"git_sha": "a" * 40, "mode": "NORMAL"},
@@ -72,25 +78,32 @@ class SmokeTests(unittest.TestCase):
                    "/api/recommendations": []}[path]
         return 200, {}, payload
 
-    @patch("app_smoke.login", return_value="test-token")
-    def test_no_recommendations_can_be_a_healthy_world(self, _):
+    def test_no_recommendations_can_be_a_healthy_world(self):
         with patch("app_smoke.request", side_effect=self.response):
-            self.assertEqual(smoke("http://test", "a" * 40, "u", "p")["status"], "passed")
+            self.assertEqual(smoke("http://test", "a" * 40, "u", "p", self.tokens())["status"], "passed")
 
-    @patch("app_smoke.login", return_value="test-token")
-    def test_wrong_release_fails_even_when_http_is_200(self, _):
+    def test_wrong_release_fails_even_when_http_is_200(self):
         with patch("app_smoke.request", side_effect=self.response), self.assertRaises(AssertionError):
-            smoke("http://test", "b" * 40, "u", "p")
+            smoke("http://test", "b" * 40, "u", "p", self.tokens())
 
-    @patch("app_smoke.login", return_value="test-token")
-    def test_stale_200_response_fails_deploy(self, _):
+    def test_stale_200_response_fails_deploy(self):
         def stale(*args, **kwargs):
             status, headers, data = self.response(*args, **kwargs)
             if args[1] == "/api/network/state":
                 data["stale"] = True
             return status, headers, data
         with patch("app_smoke.request", side_effect=stale), self.assertRaises(AssertionError):
-            smoke("http://test", "a" * 40, "u", "p")
+            smoke("http://test", "a" * 40, "u", "p", self.tokens())
+
+    def test_repeated_checks_sign_in_once(self):
+        # The caller retries this check in a loop. Signing in per attempt trips the
+        # application's own rate limiter and replaces the real error with HTTP 429.
+        tokens = TokenCache()
+        with patch("app_smoke.request", side_effect=self.response), \
+                patch("http_checks.login", return_value="test-token") as login:
+            for _ in range(5):
+                smoke("http://test", "a" * 40, "u", "p", tokens)
+        self.assertEqual(login.call_count, 1, "a retry loop must not re-authenticate")
 
     def test_both_error_envelopes(self):
         self.assertEqual(code({"detail": {"code": "ROUTE_MISMATCH"}}), "ROUTE_MISMATCH")

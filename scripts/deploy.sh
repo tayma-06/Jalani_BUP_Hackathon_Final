@@ -25,9 +25,14 @@ compose "$release" exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" "$POSTGRES
 apply_release() {
   local selected=$1
   local report=$2
-  compose "$selected" pull backend frontend &&
+  # Monitoring ships with the release, so a bad rules or Alertmanager file fails here rather
+  # than at 3am. A rollback target from before monitoring existed must still be deployable,
+  # so the service list follows what that release actually contains.
+  local services=(backend frontend)
+  [[ -f $selected/observability/alertmanager.yml ]] && services+=(alertmanager prometheus)
+  compose "$selected" pull "${services[@]}" &&
   python3 "$selected/scripts/verify_images.py" "$selected/manifest.json" &&
-  compose "$selected" up -d --no-deps --wait --wait-timeout 120 backend frontend &&
+  compose "$selected" up -d --no-deps --wait --wait-timeout 120 "${services[@]}" &&
   python3 "$selected/scripts/host_smoke.py" "$root" "$selected" "$report"
 }
 if ! apply_release "$release" "$evidence/deployed.json"; then

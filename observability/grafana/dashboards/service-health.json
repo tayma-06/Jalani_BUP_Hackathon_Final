@@ -109,8 +109,8 @@
       "title": "API 5xx error rate",
       "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
       "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
-      "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum(rate(http_requests_total[1m])), 1e-9)", "legendFormat": "5xx share"}],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0}, "overrides": []},
+      "targets": [{"refId": "A", "expr": "(sum(rate(http_requests_total{status=~\"5..\"}[1m])) or vector(0)) / clamp_min(sum(rate(http_requests_total[1m])), 1e-9)", "legendFormat": "5xx share"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"axisSoftMax": 0.05}}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
     {

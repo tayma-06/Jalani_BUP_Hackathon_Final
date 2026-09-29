@@ -1,11 +1,12 @@
 # Advanced completion worktree
 
-## Workspace restored
+**Merged into `main`.** The worktree below was a temporary working location and is not part of
+the repository. See the merge note in [advanced-work-status.md](advanced-work-status.md).
 
-Advanced changes have been merged back into `D:\BUP_Hackathon_Final` on
-`feature/advanced-intelligence`. Use that original folder for editing and running
-the application. The separate worktree is retained only as a backup; the paths
-and isolation notes below describe the earlier implementation stage.
+That work was then extended on `feature/advanced-intelligence` (the LP optimiser and the model
+training pipeline) and merged forward from `main`, so `main` remains the source of truth for
+structure while both feature sets are present. A backup ref `backup/pre-merge-*` records the
+pre-merge tip of the feature branch.
 
 Branch: `feature/advanced-completion`.
 Location: `.worktrees/advanced-completion` under the original checkout.

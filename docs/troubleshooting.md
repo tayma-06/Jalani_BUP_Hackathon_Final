@@ -18,7 +18,11 @@
 
 It is used only as a BuildKit secret during `pip wheel` / `npm ci`. It is never copied into an image, and CI does not use it.
 
-**A port is already in use (3000, 8080, 8000, 9090 or 3001).** Stop whatever uses it, e.g. an earlier `uvicorn` or `npm run dev`, or another stack (`docker ps`).
+**A port is already in use (3000, 8080, 8000, 9090, 9093 or 3001).** Stop whatever uses it, e.g. an earlier `uvicorn` or `npm run dev`, or another stack (`docker ps`).
+
+**An alert fires but nobody is notified.** Open `http://localhost:9093` (Alertmanager). If it shows no receivers, the release is missing `observability/alertmanager.yml` — see the deploy notes. Alerts are also recorded in the app under **Alerts** and **Audit log**, so the incident is still attributable without a notification channel.
+
+**The frontend container is unhealthy but the backend is fine.** `/health` now proxies the backend's liveness, so a frontend health failure means nginx cannot reach the API. Check `docker compose logs backend frontend`; a `JWT_SECRET` shorter than 32 characters is the usual cause.
 
 **The backend stays unhealthy.** Run `docker compose logs backend`. The usual causes are:
 - The DB is not ready yet. Compose waits for its health check, so give it a few seconds.
@@ -46,6 +50,15 @@ It is used only as a BuildKit secret during `pip wheel` / `npm ci`. It is never 
 **The dashboard is empty ("Waiting for the fuel network").** The backend has not completed its first valid read. Check System health, then `curl http://127.0.0.1:8000/v1/health`.
 
 **The numbers reset to tick 0.** Someone reset the simulator. The backend starts a new run. Old decision history is kept, but old pending intents are never replayed.
+
+**The briefing says "Grounded template" even though `LLM_API_KEY` is set.** Hover over the label to see the reason. Then check the `llm` component on System health (or `/api/health`):
+
+| Reason | Fix |
+|---|---|
+| `status: disabled` | The backend didn't get the key. Put `LLM_API_KEY=...` in `.env`, then run `docker compose up -d backend`. |
+| `Claude API error 401` | The key is wrong or revoked. |
+| `Claude API unreachable or timed out` | No internet access, or antivirus/proxy TLS scanning is blocking `api.anthropic.com`. |
+| `Claude used numbers not in the data` | This is the safety check working. Try again on the next tick. |
 
 ## Monitoring
 

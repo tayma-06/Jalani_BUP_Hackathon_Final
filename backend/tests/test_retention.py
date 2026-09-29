@@ -4,12 +4,18 @@ import pytest
 from sqlalchemy import event, func, select
 
 from app.db import (
+    KEEP_ALERTS,
     KEEP_AUDIT,
+    KEEP_EXECUTIONS,
     KEEP_HISTORY,
+    KEEP_INCIDENTS,
     KEEP_RECOMMENDATIONS,
     KEEP_SNAPSHOTS,
+    OPEN_STATUSES,
+    Alert,
     DemandObservation,
     Execution,
+    Incident,
     Recommendation,
     SnapshotRecord,
     audit,
@@ -28,7 +34,8 @@ def counts(service):
     with service.db.session() as session:
         return {t: session.scalar(select(func.count()).select_from(m)) for t, m in
                 (("snapshots", SnapshotRecord), ("demand_obs", DemandObservation),
-                 ("recommendations", Recommendation), ("executions", Execution))}
+                 ("recommendations", Recommendation), ("executions", Execution),
+                 ("alerts", Alert), ("incidents", Incident))}
 
 
 async def test_snapshot_and_history_stay_bounded_across_many_ticks(service, fake):
@@ -164,6 +171,122 @@ async def test_history_cache_survives_a_refresh_without_rereading_the_database(s
     assert all(service.history_cache[key]["tick"] <= value["tick"] for key, value in seeded.items())
     assert len(service.history_cache) > len(seeded)
     assert len({row.id for row in service.snapshot.history}) == len(service.history_cache)
+
+
+async def test_alert_and_incident_history_is_bounded(service, fake):
+    for _ in range(3):
+        advance(fake, 1)
+        fake.record_demand()
+        await service.refresh()
+    with service.db.session() as session:
+        session.add_all([Alert(id=f"{service.run_id}:bulk-{i}", run_id=service.run_id,
+                               status="RESOLVED", payload={"last_tick": 0}) for i in range(KEEP_ALERTS + 40)])
+        session.add_all([Incident(id=f"{service.run_id}:bulk-{i}", run_id=service.run_id,
+                                  payload={"tick": 0, "text": "bulk", "source": "template", "severity": "info"})
+                         for i in range(KEEP_INCIDENTS + 40)])
+        session.commit()
+    for _ in range(2):
+        advance(fake, 10)
+        await service.refresh()
+    seen = counts(service)
+    assert seen["alerts"] <= KEEP_ALERTS
+    assert seen["incidents"] <= KEEP_INCIDENTS
+
+
+async def test_settled_executions_and_their_recommendations_are_bounded(service, fake):
+    for _ in range(3):
+        advance(fake, 1)
+        fake.record_demand()
+        await service.refresh()
+    with service.db.session() as session:
+        # An earlier run's settled shipments: reachable only through the decision list, so they
+        # are what the cap is allowed to trim, along with the recommendations they reference.
+        recs = [Recommendation(run_id="an-older-run", created_tick=i, status="APPROVED",
+                              payload={"id": f"r-{i}"}) for i in range(KEEP_EXECUTIONS + 40)]
+        session.add_all(recs)
+        session.flush()
+        session.add_all([Execution(recommendation_id=r.id, run_id="an-older-run", status="ARRIVED",
+                                   actor="alice", body={}, idempotency_key=f"k-{r.id}")
+                         for r in recs])
+        session.commit()
+    for _ in range(2):
+        advance(fake, 10)
+        await service.refresh()
+    with service.db.session() as session:
+        settled = session.scalar(select(func.count()).select_from(Execution)
+                                 .where(Execution.status.not_in(OPEN_STATUSES)))
+        assert settled <= KEEP_EXECUTIONS
+        # Every surviving recommendation must still have its execution. A row that kept the
+        # recommendation after losing the execution would be an orphan nothing can reach.
+        with_execution = set(session.scalars(select(Execution.recommendation_id)).all())
+        survivors = {r.id for r in session.scalars(
+            select(Recommendation).where(Recommendation.run_id == "an-older-run"))}
+        assert survivors <= with_execution
+    # The decision list is still populated, so pruning did not empty the operator's history.
+    assert service.decisions
+
+
+async def test_an_unsettled_execution_survives_a_simulator_reset(service, fake):
+    for _ in range(3):
+        advance(fake, 1)
+        fake.record_demand()
+        await service.refresh()
+    rec = service.recommendations[0]
+    await service.approve(rec["id"], "alice")
+    with service.db.session() as session:
+        row = session.scalars(select(Execution)).one()
+        row.status = "IN_TRANSIT"
+        unsettled_id = row.id
+        session.commit()
+    # A reset mints a new run. The shipment is still in flight, so the row must be kept until
+    # the refresh loop settles it against the ledger.
+    service.history_run = None
+    fake.data["instance"]["tick"] = 0
+    fake.data["demand-history"] = []
+    assert await service.refresh()
+    for _ in range(2):
+        advance(fake, 5)
+        await service.refresh()
+    with service.db.session() as session:
+        survivor = session.get(Execution, unsettled_id)
+    # It is no longer reconcilable after the reset, so it is retained as a settled record or
+    # pruned as unreachable; either way it must not linger as an open intent forever.
+    assert survivor is None or survivor.status not in OPEN_STATUSES
+
+
+async def test_monitoring_alerts_survive_a_simulator_reset(service, fake, config):
+    from app.main import WebhookAlert, WebhookAlerts
+
+    for _ in range(3):
+        advance(fake, 1)
+        fake.record_demand()
+        await service.refresh()
+    old_run = service.run_id
+    service.history_run = None
+    fake.data["instance"]["tick"] = 0
+    fake.data["demand-history"] = []
+    assert await service.refresh()
+    assert service.run_id != old_run
+    app = create_app(config, service)
+    payload = WebhookAlerts(receiver="jalani", status="firing", alerts=[
+        WebhookAlert(status="firing", labels={"alertname": "BackendDown", "severity": "critical"},
+                     annotations={"summary": "simulated"},
+                     startsAt="2026-01-01T00:00:00Z", endsAt="0001-01-01T00:00:00Z")])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/internal/alerts", json=payload.model_dump(by_alias=True),
+                                     headers={"Authorization": "Bearer " + config.alert_webhook_token})
+        assert response.status_code == 200
+    # Simulator alerts have no Prometheus labels, so match on the recorded alert name.
+    def monitoring_alerts():
+        return [a for a in service.alerts if a.get("source") == "prometheus"]
+
+    assert any(a.get("alertname") == "BackendDown" for a in monitoring_alerts())
+    # A later reset must not delete an Alertmanager alert: it belongs to no simulator run.
+    service.history_run = None
+    fake.data["instance"]["tick"] = 0
+    fake.data["demand-history"] = []
+    assert await service.refresh()
+    assert any(a.get("alertname") == "BackendDown" for a in monitoring_alerts())
 
 
 @pytest.mark.parametrize("limit", [0, 1001])

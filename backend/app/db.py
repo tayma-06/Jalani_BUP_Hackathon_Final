@@ -23,6 +23,9 @@ KEEP_SNAPSHOTS = 3
 KEEP_HISTORY = 18000
 KEEP_RECOMMENDATIONS = 300
 KEEP_AUDIT = 5000
+KEEP_ALERTS = 500
+KEEP_INCIDENTS = 500
+KEEP_EXECUTIONS = 500
 # An execution is still in flight until the simulator ledger reports a terminal state.
 OPEN_STATUSES = ("UNKNOWN", "PREPARED", "PENDING", "IN_TRANSIT")
 
@@ -212,6 +215,39 @@ class Database:
                 .order_by(Recommendation.created_tick.desc()).limit(KEEP_RECOMMENDATIONS)
             ),
         ))
+        # Alerts and incidents are read per run, so an older run's rows are unreachable. The
+        # Alertmanager rows carry run_id "monitoring" and outlive a reset, so they are kept
+        # and capped instead of being deleted with the run they fired in.
+        session.execute(delete(Alert).where(Alert.run_id != run_id, Alert.run_id != "monitoring"))
+        session.execute(delete(Incident).where(Incident.run_id != run_id))
+        session.execute(delete(Alert).where(
+            Alert.id.not_in(select(Alert.id).order_by(Alert.id.desc()).limit(KEEP_ALERTS))
+        ))
+        session.execute(delete(Incident).where(
+            Incident.id.not_in(select(Incident.id).order_by(Incident.id.desc()).limit(KEEP_INCIDENTS))
+        ))
+        # An execution the simulator has not settled must survive a reset, because the refresh
+        # loop still reconciles it against the ledger. Settled rows older than the newest page
+        # are unreachable: the decision list reads the most recent KEEP_EXECUTIONS.
+        session.execute(delete(Execution).where(
+            Execution.status.not_in(OPEN_STATUSES),
+            Execution.id.not_in(
+                select(Execution.id).where(Execution.status.not_in(OPEN_STATUSES))
+                .order_by(Execution.created_at.desc()).limit(KEEP_EXECUTIONS)
+            ),
+        ))
+        # Recommendations referenced only by a pruned execution are now unreachable, so the
+        # reference check above can be re-run to collect them. Pending proposals must survive:
+        # only approved, expired or foreign-run rows with no surviving execution are orphans.
+        session.execute(
+            delete(Recommendation).where(
+                or_(
+                    Recommendation.run_id != run_id,
+                    Recommendation.status != "PROPOSED",
+                ),
+                Recommendation.id.not_in(select(Execution.recommendation_id)),
+            )
+        )
         # The audit trail is the accountability record, so it outlives a run. It is still
         # bounded, at roughly a year of an operator's activity.
         session.execute(delete(Audit).where(

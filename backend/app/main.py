@@ -82,7 +82,7 @@ class WebhookAlert(BaseModel):
     endsAt: str = ""
 
 
-class WebhookPayload(BaseModel):
+class WebhookAlerts(BaseModel):
     version: str = "4"
     status: str = ""
     receiver: str = ""
@@ -214,7 +214,7 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.post("/api/internal/alerts")
-    async def alertmanager_webhook(payload: WebhookPayload, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    async def alertmanager_webhook(payload: WebhookAlerts, credentials: HTTPAuthorizationCredentials = Depends(security)):
         """Receive Prometheus alerts and record them alongside the simulator's own alerts.
 
         Alertmanager cannot sign in, so the shared webhook token is the credential. Anything

@@ -324,6 +324,9 @@ class FuelService:
                     continue
                 if row.id not in seen and tick - row.payload["last_tick"] >= 4:
                     row.status = "RESOLVED"
+            # Alerts and incidents are written after the prune above, so re-apply the caps to
+            # keep a long-lived run from exceeding them by one cycle's worth of rows.
+            self.db.prune(session, self.run_id)
             session.commit()
 
     def load_views(self):
@@ -331,8 +334,17 @@ class FuelService:
             self.recommendations = [{**r.payload, "id": r.id, "run_id": r.run_id, "status": r.status}
                 for r in session.scalars(select(Recommendation).where(Recommendation.run_id == self.run_id)
                                         .order_by(Recommendation.created_tick.desc()).limit(200))]
-            self.alerts = [{**r.payload, "id": r.id, "status": r.status} for r in session.scalars(
-                select(Alert).where(or_(Alert.run_id == self.run_id, Alert.run_id == "monitoring")))]
+            self.alerts = []
+            for row in session.scalars(
+                    select(Alert).where(or_(Alert.run_id == self.run_id, Alert.run_id == "monitoring"))):
+                view = {**row.payload, "id": row.id, "status": row.status}
+                # Every alert exposes the same label set, so callers never branch on the
+                # original source: Prometheus alerts carry labels already, simulator alerts
+                # fall back to the fields the legacy Alerts page rendered.
+                view["labels"] = row.payload.get("labels") or {
+                    "alertname": row.payload.get("type") or row.payload.get("alertname") or "UnknownAlert",
+                    "severity": row.payload.get("severity", "none")}
+                self.alerts.append(view)
             self.incidents = [{"id": r.id, **r.payload} for r in session.scalars(
                 select(Incident).where(Incident.run_id == self.run_id))][-50:][::-1]
             self.decisions = [self.execution_json(r) for r in session.scalars(

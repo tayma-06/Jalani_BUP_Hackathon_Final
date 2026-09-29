@@ -1,37 +1,52 @@
-# Validation status: 29 September 2026
+﻿# Validation status: 29 September 2026
 
-Verified on an Intel i7-14650HX / 15.7 GB / Windows 11 machine with Docker Desktop, against the official simulator image `asifmahmoud414/bup-fuel-supply-simulator:1.0.0` (`sha256:7067050693f4…`).
+The final deployment target is **local Docker**. A remote SSH host is optional and is outside the selected deliverable. Source checks, archived runtime evidence and verification of the current build are recorded separately below.
 
-## Passed
+## Current source checks
 
-| Check | Result | Evidence |
+| Check | Latest observed result | Evidence / command |
 |---|---|---|
-| Backend lint (ruff) | Clean, on Python 3.11 in a container | CI command, run locally |
-| Backend behavioral tests | **33 / 33** on Python 3.11 (Linux container) and 3.14 (Windows) | `pytest backend/tests` |
-| CI/CD automation tests | **16 / 16** on Python 3.11 (Linux). On Windows, 3 symlink tests need Developer Mode | `unittest discover -s tests_ci` |
-| Frontend lint, typecheck, tests, build | Clean; **17 / 17** tests on Node 22 (CI version) and Node 24. Entry bundle 316 kB, chart code split into a separate on-demand chunk under a 400 kB build budget | `npm run lint / typecheck / test:ci / build` |
-| Pinned dependency locks | `backend/requirements.lock`, `backend/requirements-dev.lock` (Python 3.11), `frontend/package-lock.json` | Installed cleanly in fresh containers |
-| Docker images build; full stack starts healthy | simulator, postgres, backend, frontend, prometheus, grafana | `docker compose up -d --build --wait` |
-| Official simulator contract | Passed: idempotent replay returns the same allocation, changed body rejected, pending cancel works | `docs/evidence/simulator-contract.json` |
-| App smoke through nginx | Passed: HTML served, live/ready 200, NORMAL mode, fresh data (0.4 s), 4 stations | `docs/evidence/app-smoke.json` |
-| Fault injection and recovery | `stale_data` and `unavailable` detected in ~1.1 s, cached reads stayed available, readiness 503, recovered in ~1.1 s | `docs/evidence/fault-recovery.json` |
-| End-to-end drill | Role 403s, over-limit 422, double approval → exactly 1 shipment, delivery IN_TRANSIT → ARRIVED, disrupted route avoided, demand spike raised 3 alerts | `docs/evidence/e2e-drill.json` |
-| Browser check | All 9 pages, desktop 1440 px and mobile 390 px: no horizontal overflow, no console errors, charts render. The audit-log page was added after this pass; its behaviour is covered by frontend tests | `docs/evidence/app-*.png` |
-| Policy benchmark | 3 policies × 2 scenarios × 288 ticks, same seed and events | [benchmark.md](benchmark.md), `docs/evidence/benchmark-*.json` |
-| Load test | 30 users, 0 failures, p95 132 ms, all thresholds passed | [load-test.md](load-test.md), `docs/evidence/load-dashboard.json` |
-| Monitoring | Prometheus scrapes the backend (UP), Alertmanager receives and groups alerts, and the backend records them at `/api/internal/alerts`. Every dashboard query returns live data. Grafana provisions the 20-panel dashboard | `docs/evidence/grafana-*.png` |
-| Compose files | `docker-compose.yml`, `compose.ci.yml` and `deploy/compose.yml` pass `docker compose config` | — |
-| Durable growth is bounded | Retention caps hold under repeated refreshes, a simulator reset and a restart; no table grows without limit | `backend/tests/test_retention.py` |
+| Backend lint | Passed | `python -m ruff check backend` |
+| Backend behavioral tests | **33 passed** before the monitoring integration fixes; rerun pending | `PYTHONPATH=backend python -m pytest backend/tests` |
+| Frontend tests | **17 passed** before the monitoring integration fixes; rerun pending | `npm run test:ci` |
+| Frontend type checking | Passed | `npm run typecheck` |
+| CI/CD automation on Windows | **11 passed; 5 symlink-creation errors** | `python -m unittest discover -s tests_ci`; run on Linux to verify the complete suite |
+| Timed rehearsal script | Ruff and CLI help passed; runtime pending | `scripts/timed_rehearsal.py` |
 
-## Not run
+Test counts describe the measured run, not a permanent claim about the size of the suite. The last current-source test run is distinct from GitHub Actions completion.
 
-| Check | Why |
+## Current local deployment verification
+
+| Check | Status |
 |---|---|
-| GitHub Actions run, red→green PR, GHCR image release | The workflow is ready, but it has not been triggered on GitHub from this machine. |
-| SSH deployment, rollback on a real host, data continuity | No deployment host or credentials. `tests_ci` exercises the deploy/rollback script logic against a fake Docker only. |
-| Prometheus alert firing end to end | The rules load and Alertmanager is wired and started by both stacks, but no alert was observed firing against the live simulator, so the delivery path is verified by configuration and by the backend's ingest tests rather than by a real page. |
-| DB-outage drill on the live stack | Covered by a backend test (`test_db_failure_blocks_post_but_preserves_cache`), not demonstrated live. |
-| Forecast calibration / accuracy study | Not measured. Risk values are model estimates. |
-| Final timed rehearsal | Needs the event's actual time limit. |
+| Rebuild and restart from complete current source | In progress; final build identity and health still need recording |
+| `/api/audit` and `/api/internal/alerts` in running backend | Pending after rebuild. The previous running image lacked both routes |
+| Prometheus connected to Alertmanager | Pending after restart. The previous runtime reported no active Alertmanager |
+| Alert fires, appears in the application and resolves | Pending a real end-to-end monitoring drill; configuration and unit tests alone do not prove delivery |
+| Timed demand spike -> shortage -> recommendation -> operator approval -> arrival -> failure -> recovery | Prepared in `scripts/timed_rehearsal.py`; measured run pending |
+| Local update and rollback with durable data | Pending runtime verification |
+| Commit/push and GitHub Actions | Pending a final commit and GitHub run; local tests do not establish a GitHub result |
 
-The earlier version of this file described the planning pack before any application existed. The raw output of that earlier validation is kept in `docs/local-validation.txt`.
+## Archived measured evidence
+
+These artifacts are retained from earlier runs against the official simulator. They support their recorded scenarios and builds; they are not proof that the latest image has been deployed.
+
+| Check | Recorded result | Evidence |
+|---|---|---|
+| Official simulator contract | Idempotent replay returned the same allocation; changed body rejected; pending cancel worked | `docs/evidence/simulator-contract.json` |
+| App smoke through nginx | HTML served; liveness/readiness 200; NORMAL mode; 4 stations. Recorded build identity is `local-verify` | `docs/evidence/app-smoke.json` |
+| Fault injection and recovery | Stale/unavailable faults detected in about 1.1 s; cached reads remained available; readiness 503; recovered in about 1.1 s | `docs/evidence/fault-recovery.json` |
+| End-to-end drill | Roles enforced, oversized approval rejected, duplicate approval created one shipment, shipment arrived, disrupted route avoided, demand spike raised 3 alerts; 4.6 s API drill | `docs/evidence/e2e-drill.json` |
+| Browser review | Screenshots cover desktop/mobile views of the earlier build. They do not establish a browser pass for the later audit and monitoring changes | `docs/evidence/app-*.png` |
+| Policy benchmark | Three policies, two scenarios, 288 ticks; both active policies served all demand in these runs | [benchmark.md](benchmark.md), `docs/evidence/benchmark-*.json` |
+| Load test | 30 concurrent users; zero failed requests; p95 131.6 ms | [load-test.md](load-test.md), `docs/evidence/load-dashboard.json` |
+| Grafana monitoring | Earlier screenshots show provisioned dashboards; they do not establish alert delivery | `docs/evidence/grafana-*.png` |
+
+The archived simulator is `asifmahmoud414/bup-fuel-supply-simulator:1.0.0`; the benchmark documents scenario, seed, tick length and machine. Historic raw planning checks remain in `docs/local-validation.txt`.
+
+## Remaining limits
+
+- A timed API rehearsal does not measure speaking time or create a backup recording. Use [demo-script.md](demo-script.md) for the eight-minute presentation and record a human run separately.
+- Forecast error and risk calibration have not been measured. Risk values are model estimates.
+- A live database-outage drill has not been recorded; backend tests cover the write gate and cached-read behavior.
+- Remote SSH deployment and rollback are optional, outside the selected local Docker delivery. Script tests use fake Docker and are not evidence of a remote deployment.

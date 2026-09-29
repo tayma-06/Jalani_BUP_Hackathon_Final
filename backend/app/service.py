@@ -28,9 +28,15 @@ from app.intelligence.engine import (
     analyse,
     detect,
     historical_multiplier,
+    inventory_reconciliation,
     recommend,
+    reevaluate_review,
     validate_batch,
 )
+from app.policy_registry import active_version, supersede_stale_recommendations
+from app.policy_registry import history as policy_history
+from app.policy_registry import register as register_policy
+from app.policy_registry import rollback as rollback_policy
 from app.sim.client import SimError, SimulatorClient
 from app.sim.schemas import FUELS, Allocation, Instance, Snapshot
 
@@ -103,7 +109,9 @@ class FuelService:
             self.analysis = analyse(self.snapshot, self.config.monte_carlo_paths)
             self.build_network()
         self.autopilot = self.db.setting("autopilot", {"mode": "advisory"})["mode"]
-        configured = self.db.setting("policy", {})
+        with self.db.session() as session:
+            row = active_version(session)
+            configured = row.config if row is not None else self.db.setting("policy", {})
         self.policy_name = configured.get("version", "greedy_v1")
         self.policy.update({k: v for k, v in configured.items() if k in self.policy})
         self.restored = True
@@ -192,7 +200,8 @@ class FuelService:
                     self.last_saved_tick = snapshot.instance.tick
                 session.commit()
             analysis = await asyncio.to_thread(analyse, snapshot, self.config.monte_carlo_paths, self.config.horizon_hours)
-            new_alerts = detect(snapshot, analysis, None if reset else previous)
+            unexplained = inventory_reconciliation(snapshot, None if reset else previous)
+            new_alerts = detect(snapshot, analysis, None if reset else previous, unexplained)
             if self.history_gap:
                 new_alerts.append({"key": "history_gap", "type": "history_gap", "entity_id": "simulator",
                                    "severity": "WARNING", "message": "Demand rows are missing; forecast history is incomplete.",
@@ -229,6 +238,28 @@ class FuelService:
             metrics.stale.set(int(not self.safe()))
         return False
 
+    def rejection_suppressed(self, rejected, plan, tick):
+        """Why an identical proposal is not regenerated yet, or None when it may be.
+
+        A rejection means an operator already looked at this decision. Repeating the same
+        proposal every second is noise, so regeneration waits for either a real change in
+        the risk being managed, a new crisis, or the end of the documented cooldown.
+        """
+        if rejected is None:
+            return None
+        if tick - rejected.created_tick >= self.config.rejection_cooldown_ticks:
+            return None
+        before = rejected.payload.get("impact", {}).get("risk_before", 0.0) or 0.0
+        if (plan["impact"]["risk_before"] or 0.0) >= before + self.config.rejection_risk_margin:
+            return None
+        if "crisis_event" in (plan.get("review_reasons") or []) and \
+                "crisis_event" not in (rejected.payload.get("review_reasons") or []):
+            return None
+        age = tick - rejected.created_tick
+        return (f"Rejected {age} tick(s) ago and the risk being managed has not risen by "
+                f"{self.config.rejection_risk_margin:.0%}. Cooldown ends at "
+                f"{rejected.created_tick + self.config.rejection_cooldown_ticks}, or sooner if risk worsens.")
+
     def persist_intelligence(self, snapshot, alerts, plans):
         tick = snapshot.instance.tick
         with self.db.session() as session:
@@ -237,16 +268,37 @@ class FuelService:
             for row in open_recs:
                 if row.run_id != self.run_id or tick - row.created_tick > 4 or row.payload["action"]["route_id"] not in valid_routes:
                     row.status = "EXPIRED"
-            existing = {(r.payload["station_id"], r.payload["fuel_type"]) for r in open_recs if r.status == "PROPOSED"}
+            # One open proposal per station and fuel. `recommend` may emit several shipments
+            # for the same pair, so the set is updated as proposals are accepted; otherwise a
+            # second proposal for the same tank would be persisted alongside the first.
+            existing = {(r.payload["station_id"], r.payload["fuel_type"]) for r in open_recs
+                        if r.status == "PROPOSED"}
+            rejected = {}
+            for row in session.scalars(select(Recommendation).where(
+                    Recommendation.run_id == self.run_id, Recommendation.status == "REJECTED")):
+                key = (row.payload["station_id"], row.payload["fuel_type"])
+                if key not in rejected or row.created_tick > rejected[key].created_tick:
+                    rejected[key] = row
             for plan in plans:
-                if (plan["station_id"], plan["fuel_type"]) not in existing:
+                key = (plan["station_id"], plan["fuel_type"])
+                if key in existing:
+                    continue
+                held = rejected.get(key)
+                suppression = self.rejection_suppressed(held, plan, tick)
+                if suppression is None:
                     row = Recommendation(run_id=self.run_id, created_tick=tick, status="PROPOSED", payload=plan)
                     session.add(row)
+                    existing.add(key)
                     metrics.recommendations.labels("PROPOSED").inc()
                     metrics.confidence.observe(plan["confidence"]["score"])
                     if plan["requires_review"]:
                         metrics.review.inc()
                     self.event("decision.proposed", station_id=plan["station_id"], fuel_type=plan["fuel_type"])
+                else:
+                    # Visible, durable and expiring: a suppression must never be a silent drop.
+                    held.payload = {**held.payload, "suppression": suppression, "suppressed_until_tick":
+                                    held.created_tick + self.config.rejection_cooldown_ticks}
+                    metrics.recommendations.labels("SUPPRESSED").inc()
             seen = set()
             for item in alerts:
                 key = f"{self.run_id}:{item['key']}"
@@ -370,6 +422,37 @@ class FuelService:
         if stale or instance.tick < self.snapshot.instance.tick or instance.tick - self.snapshot.start_tick > self.config.max_tick_lag:
             raise HTTPException(409, "Simulator tick moved beyond the execution gate; refresh and review again")
 
+    def policy_registry(self):
+        with self.db.session() as session:
+            return policy_history(session)
+
+    def activate_policy(self, version, config, actor, reason):
+        with self.db.session() as session:
+            row, changed = register_policy(session, version, config, actor, reason, self.run_id)
+            if changed:
+                superseded = supersede_stale_recommendations(session, self.run_id, version)
+                self.db.put_setting(session, "policy", config)
+                session.commit()
+                self.policy, self.policy_name = config, version
+                self.dirty.set()
+                self.event("policy.changed", version=version, actor=actor, superseded=superseded)
+            return {"version": row.version, "config": row.config, "changed": changed,
+                    "previous_version": row.previous_version, "superseded": superseded if changed else 0,
+                    "registry": policy_history(session)}
+
+    def rollback_policy(self, actor, reason, to_version=None):
+        with self.db.session() as session:
+            target, previous = rollback_policy(session, actor, reason, to_version)
+            superseded = supersede_stale_recommendations(session, self.run_id, target.version)
+            self.db.put_setting(session, "policy", target.config)
+            session.commit()
+            config = dict(target.config)
+        self.policy, self.policy_name = config, target.version
+        self.dirty.set()
+        self.event("policy.rolled_back", from_version=previous, to_version=target.version, actor=actor)
+        return {"version": target.version, "config": config, "previous_version": previous,
+                "superseded": superseded, "registry": self.policy_registry()}
+
     async def approve(self, rec_id, actor, quantity=None):
         async with self.lock:
             try:
@@ -388,9 +471,23 @@ class FuelService:
                         raise HTTPException(404, "Recommendation not found in the current run")
                     if rec.status != "PROPOSED":
                         raise HTTPException(409, f"Recommendation is {rec.status.lower()}")
-                    if actor == "AUTOPILOT" and (self.autopilot != "auto" or rec.payload["requires_review"]
-                                                 or rec.payload["confidence"]["score"] < 0.75):
-                        raise HTTPException(409, "Human review is required")
+                    # Re-check the review requirement against the state that will actually be
+                    # used, not the snapshot the proposal was written against. A crisis or a
+                    # disruption that began after the proposal escalates the requirement here,
+                    # and an escalated proposal can no longer be auto-approved.
+                    reasons, newly = reevaluate_review(self.snapshot, rec.payload)
+                    payload = rec.payload
+                    if newly and not payload.get("requires_review"):
+                        payload = {**payload, "requires_review": True, "review_reasons": reasons,
+                                   "review_escalated_at_tick": self.snapshot.instance.tick}
+                        metrics.review.inc()
+                    if payload["policy_version"] != self.policy_name:
+                        payload = {**payload, "review_reasons": sorted(set(reasons) | {"policy_changed"})}
+                    if actor == "AUTOPILOT" and (self.autopilot != "auto" or payload["requires_review"]
+                                                 or payload["confidence"]["score"] < 0.75):
+                        raise HTTPException(409, "Human review is required: " + ", ".join(
+                            payload.get("review_reasons") or ["high-impact decision"]))
+                    rec.payload = payload
                     action = rec.payload["action"]
                     qty = quantity if quantity is not None else action["quantity"]
                     if qty > action["quantity"]:

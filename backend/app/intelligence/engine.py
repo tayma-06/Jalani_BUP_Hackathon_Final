@@ -396,15 +396,18 @@ def inventory_reconciliation(snapshot, previous, relative_tolerance=0.02, absolu
     """
     if previous is None:
         return []
-    low, high = previous.instance.tick, snapshot.end_tick
+    low, high = previous.instance.tick, snapshot.instance.tick
+    if high <= low or not previous.consistent or not snapshot.consistent:
+        return []
     served = {}
+    ticks = {}
     for row in snapshot.history:
         if low < row.tick <= high:
             key = (row.station_id, row.fuel_type)
+            if row.tick in ticks.setdefault(key, set()):
+                continue
+            ticks[key].add(row.tick)
             served[key] = served.get(key, 0.0) + row.served_liters
-    expected_rows = max(0, high - low) * len(snapshot.stations) * 3
-    if expected_rows and len(snapshot.history) < expected_rows and high > previous.end_tick:
-        return []  # Missing history: an unexplained delta here is not evidence of anything.
     arrived = {}
     for allocation in snapshot.allocations:
         if allocation.destination_station_id is None or allocation.actual_arrival_tick is None:
@@ -419,6 +422,8 @@ def inventory_reconciliation(snapshot, previous, relative_tolerance=0.02, absolu
             continue
         for fuel in FUELS:
             key = (station.id, fuel)
+            if ticks.get(key, set()) != set(range(low + 1, high + 1)):
+                continue  # Require complete history for this tank, not unrelated tanks.
             predicted = max(0.0, before.inventory[fuel] - served.get(key, 0.0) + arrived.get(key, 0.0))
             actual = station.inventory[fuel]
             tolerance = max(absolute_tolerance, predicted * relative_tolerance)

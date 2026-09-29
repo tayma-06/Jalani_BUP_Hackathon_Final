@@ -22,6 +22,7 @@ from app.db import (
     SnapshotRecord,
     audit,
 )
+from app.intelligence.drift import DriftMonitor
 from app.intelligence.engine import (
     ACTIVE,
     POLICY,
@@ -52,6 +53,7 @@ class FuelService:
         self.dirty = asyncio.Event()
         self.snapshot = None
         self.analysis = {}
+        self.drift = DriftMonitor()
         self.run_id = str(uuid4())
         self.fetched_at = 0.0
         self.stale = True
@@ -145,6 +147,7 @@ class FuelService:
                           or bool(old_keys - new_keys)
                           or snapshot.metrics.served_demand_liters + 0.01 < previous.metrics.served_demand_liters)
             if reset:
+                self.drift = DriftMonitor()
                 self.run_id = str(uuid4())
                 self.analysis = {}
                 self.last_saved_tick = -100
@@ -202,6 +205,8 @@ class FuelService:
             analysis = await asyncio.to_thread(analyse, snapshot, self.config.monte_carlo_paths, self.config.horizon_hours)
             unexplained = inventory_reconciliation(snapshot, None if reset else previous)
             new_alerts = detect(snapshot, analysis, None if reset else previous, unexplained)
+            new_alerts.extend(self.drift.observe(snapshot))
+            self.drift.issue(snapshot.instance.tick, analysis)
             if self.history_gap:
                 new_alerts.append({"key": "history_gap", "type": "history_gap", "entity_id": "simulator",
                                    "severity": "WARNING", "message": "Demand rows are missing; forecast history is incomplete.",
@@ -251,6 +256,11 @@ class FuelService:
             return None
         before = rejected.payload.get("impact", {}).get("risk_before", 0.0) or 0.0
         if (plan["impact"]["risk_before"] or 0.0) >= before + self.config.rejection_risk_margin:
+            return None
+        # Probability saturates at 100%; worsening shortage volume still needs review.
+        old_unmet = rejected.payload.get("impact", {}).get("unmet_before_l", 0.0) or 0.0
+        new_unmet = plan.get("impact", {}).get("unmet_before_l", 0.0) or 0.0
+        if new_unmet - old_unmet >= max(500.0, old_unmet * 0.25):
             return None
         if "crisis_event" in (plan.get("review_reasons") or []) and \
                 "crisis_event" not in (rejected.payload.get("review_reasons") or []):

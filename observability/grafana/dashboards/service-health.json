@@ -2,7 +2,7 @@
   "uid": "jalani-service-health",
   "title": "Jalani - Service Health",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "tags": [
     "jalani"
   ],
@@ -13,190 +13,225 @@
   },
   "panels": [
     {
+      "id": 100,
+      "type": "row",
+      "title": "Availability and data freshness",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1},
+      "panels": []
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Backend up",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "jalani-prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "up{job=\"jalani-backend\"}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 1, "w": 8, "h": 7},
+      "targets": [{"refId": "A", "expr": "up{job=\"jalani-backend\"}", "legendFormat": "backend"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Simulator data reads",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "jalani-prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
+      "title": "Simulator data reads (1 = fresh, validated)",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 8, "y": 1, "w": 8, "h": 7},
       "targets": [
-        {
-          "refId": "A",
-          "expr": "sim_up"
-        }
+        {"refId": "A", "expr": "sim_up", "legendFormat": "REST reads"},
+        {"refId": "B", "expr": "sim_stream_connected", "legendFormat": "SSE stream"},
+        {"refId": "C", "expr": "sim_circuit_state", "legendFormat": "circuit open"}
       ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "System mode",
+      "description": "0 = NORMAL, 1 = DEGRADED (execution blocked), 2 = RECOVERING",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 16, "y": 1, "w": 8, "h": 7},
+      "targets": [{"refId": "A", "expr": "system_mode"}],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "mappings": [{"type": "value", "options": {
+            "0": {"text": "NORMAL", "color": "green"},
+            "1": {"text": "DEGRADED", "color": "red"},
+            "2": {"text": "RECOVERING", "color": "orange"}}}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+        },
         "overrides": []
       },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}}
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Data age (seconds)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "jalani-prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "state_age_seconds"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
+      "description": "Execution is blocked above 15 s.",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 7},
+      "targets": [{"refId": "A", "expr": "state_age_seconds", "legendFormat": "last good snapshot"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Stale flag",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "jalani-prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "state_stale"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
+      "title": "Stale flag (1 = not safe to execute)",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 7},
+      "targets": [{"refId": "A", "expr": "state_stale", "legendFormat": "stale"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Performance and errors",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 1},
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "API latency p95 by endpoint",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(http_request_duration_seconds_bucket[1m])))", "legendFormat": "{{handler}}"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"]}}
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "API 5xx error rate",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+      "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum(rate(http_requests_total[1m])), 1e-9)", "legendFormat": "5xx share"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Simulator call latency p95 by endpoint",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(sim_request_duration_seconds_bucket[1m])))", "legendFormat": "{{endpoint}}"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"]}}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Simulator calls per second by result",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
+      "targets": [{"refId": "A", "expr": "sum by (status) (rate(sim_requests_total[1m]))", "legendFormat": "{{status}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Decision cycle p95",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 32, "w": 12, "h": 7},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(decision_cycle_seconds_bucket[5m])))", "legendFormat": "forecast + allocation"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Backend memory",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 32, "w": 12, "h": 7},
+      "targets": [{"refId": "A", "expr": "process_resident_memory_bytes{job=\"jalani-backend\"}", "legendFormat": "resident"}],
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Fuel network and decisions (simulated environment)",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 39, "w": 24, "h": 1},
+      "panels": []
     },
     {
       "id": 5,
       "type": "timeseries",
       "title": "Simulated service level",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "jalani-prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sim_service_level"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 40, "w": 12, "h": 8},
+      "targets": [{"refId": "A", "expr": "sim_service_level", "legendFormat": "service level"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
     {
-      "id": 6,
+      "id": 13,
       "type": "timeseries",
-      "title": "Backend memory (bytes)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "jalani-prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
+      "title": "Unmet demand and failed allocations (cumulative this run)",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 40, "w": 12, "h": 8},
       "targets": [
-        {
-          "refId": "A",
-          "expr": "process_resident_memory_bytes{job=\"jalani-backend\"}"
-        }
+        {"refId": "A", "expr": "sim_unmet_liters", "legendFormat": "unmet litres"},
+        {"refId": "B", "expr": "sim_allocation_failures", "legendFormat": "failed allocations"}
       ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      }
+      "fieldConfig": {"defaults": {}, "overrides": [{"matcher": {"id": "byName", "options": "failed allocations"}, "properties": [{"id": "custom.axisPlacement", "value": "right"}]}]},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Station inventory (litres)",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 48, "w": 12, "h": 9},
+      "targets": [{"refId": "A", "expr": "station_inventory_liters", "legendFormat": "{{station}} {{fuel}}"}],
+      "fieldConfig": {"defaults": {"min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Estimated 12 h stockout risk",
+      "description": "Model estimate from Monte Carlo demand paths, not a calibrated probability.",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 48, "w": 12, "h": 9},
+      "targets": [{"refId": "A", "expr": "station_stockout_risk", "legendFormat": "{{station}} {{fuel}}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Decisions (last 5 min)",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 0, "y": 57, "w": 12, "h": 8},
+      "targets": [
+        {"refId": "A", "expr": "sum by (mode) (increase(decisions_executed_total[5m]))", "legendFormat": "executed ({{mode}})"},
+        {"refId": "B", "expr": "sum by (status) (increase(recommendations_total[5m]))", "legendFormat": "recommendations {{status}}"},
+        {"refId": "C", "expr": "sum(increase(human_review_requests_total[5m]))", "legendFormat": "queued for human review"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Average recommendation confidence and new alerts",
+      "description": "Confidence is a heuristic score, not a calibrated probability.",
+      "datasource": {"type": "prometheus", "uid": "jalani-prometheus"},
+      "gridPos": {"x": 12, "y": 57, "w": 12, "h": 8},
+      "targets": [
+        {"refId": "A", "expr": "rate(recommendation_confidence_sum[5m]) / rate(recommendation_confidence_count[5m])", "legendFormat": "avg confidence"},
+        {"refId": "B", "expr": "sum by (severity) (increase(shortage_alerts_total[5m]))", "legendFormat": "new {{severity}} alerts"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0}, "overrides": [{"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "custom.axisPlacement", "value": "right"}]}]},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     }
   ]
 }

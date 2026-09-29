@@ -1,0 +1,12 @@
+# Human-edited runtime dependencies. Regenerate requirements.lock after editing (see README).
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+httpx
+sqlalchemy
+psycopg[binary]
+pyjwt
+prometheus-client
+numpy
+pyyaml

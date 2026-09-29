@@ -1,0 +1,117 @@
+# Local / demo stack: `docker compose up -d --build --wait`, then open http://localhost:3000.
+# Every value has a demo default; copy .env.example to .env to override. Ports bind to loopback only.
+# CI uses compose.ci.yml and hosts use deploy/compose.yml; this file is for laptops and rehearsals.
+name: jalani
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: '10m', max-file: '3'}
+
+services:
+  simulator:
+    image: asifmahmoud414/bup-fuel-supply-simulator:1.0.0
+    restart: unless-stopped
+    environment:
+      SIMULATION_SPEED: ${SIMULATION_SPEED:-1}
+      TICK_MINUTES: '15'
+      SIMULATOR_START_MODE: paused
+    ports: ['127.0.0.1:8000:8000']
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jalani
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jalani-local-password}
+      POSTGRES_DB: jalani
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jalani -d jalani']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  backend:
+    image: jalani-backend:local
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-local}
+        GIT_SHA: ${GIT_SHA:-dev}
+      secrets: [extra_ca]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://jalani:${POSTGRES_PASSWORD:-jalani-local-password}@db:5432/jalani
+      SIMULATOR_URL: ${SIMULATOR_URL:-http://simulator:8000}
+      JWT_SECRET: ${JWT_SECRET:-local-demo-secret-change-me-before-any-deploy}
+      VIEWER_USER: ${VIEWER_USER:-viewer}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-demo-viewer}
+      OPERATOR_USER: ${OPERATOR_USER:-operator}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-demo-operator}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-demo-admin}
+      CHAOS_ENABLED: ${CHAOS_ENABLED:-false}
+      APP_VERSION: ${APP_VERSION:-local}
+      GIT_SHA: ${GIT_SHA:-dev}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    ports: ['127.0.0.1:8080:8080']
+    depends_on:
+      db: {condition: service_healthy}
+      simulator: {condition: service_healthy}
+    logging: *logging
+
+  frontend:
+    image: jalani-frontend:local
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-local}
+        GIT_SHA: ${GIT_SHA:-dev}
+      secrets: [extra_ca]
+    restart: unless-stopped
+    ports: ['127.0.0.1:3000:80']
+    depends_on:
+      backend: {condition: service_started}
+    logging: *logging
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
+    ports: ['127.0.0.1:9090:9090']
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-demo-grafana}
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/service-health.json
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ['127.0.0.1:3001:3000']
+    depends_on: [prometheus]
+    logging: *logging
+
+volumes:
+  pgdata:
+
+secrets:
+  # Only needed behind TLS-intercepting antivirus/proxies. See README "Troubleshooting".
+  extra_ca:
+    file: ${EXTRA_CA_FILE:-./docker/no-extra-ca.pem}

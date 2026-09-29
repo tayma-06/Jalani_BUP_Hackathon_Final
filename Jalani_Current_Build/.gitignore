@@ -12,6 +12,3 @@ release-bundle/
 *.tar
 *.tgz
 *.sql
-*.db
-*.tsbuildinfo
-ca-bundle.pem

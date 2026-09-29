@@ -1,0 +1,5 @@
+# Human-edited test/lint dependencies on top of the runtime set.
+-r requirements.txt
+pytest
+pytest-asyncio
+ruff

@@ -8,7 +8,7 @@
 > Companion files: `whatwillbedone.md` (what each step produces + theory) · `prompts.md` (copy-paste prompts).
 
 ---
-![alt text](image.png)
+
 ## 0. TL;DR
 
 A web **operator console + backend "brain"** on top of the simulator that runs the brief's loop:

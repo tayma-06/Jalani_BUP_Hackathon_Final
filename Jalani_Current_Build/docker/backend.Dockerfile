@@ -2,11 +2,7 @@
 FROM python:3.11-slim AS dependencies
 WORKDIR /build
 COPY backend/requirements.lock .
-# Optional build secret `extra_ca`: a full CA bundle for networks that intercept TLS
-# (e.g. antivirus HTTPS scanning). Absent or empty in CI, so the default trust store is used.
-RUN --mount=type=secret,id=extra_ca \
-    if [ -s /run/secrets/extra_ca ]; then export PIP_CERT=/run/secrets/extra_ca; fi; \
-    python -m pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.lock
+RUN python -m pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.lock
 
 FROM python:3.11-slim
 ARG APP_VERSION=dev

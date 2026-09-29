@@ -1,0 +1,29 @@
+export type Fuel = 'DIESEL' | 'PETROL' | 'OCTANE';
+export const fuels: Fuel[] = ['DIESEL', 'PETROL', 'OCTANE'];
+export type Page = 'Overview' | 'Stations & depots' | 'Recommendations' | 'Alerts' | 'Supply & disruptions' | 'Forecasts' | 'Decision history' | 'System health' | 'Control room';
+export type Session = { access_token: string; role: 'viewer' | 'operator' | 'admin'; username: string };
+export type FuelState = { inventory: number; capacity: number; in_transit?: number; forecast_12h?: number; hours_to_stockout?: number | null; risk?: number; risk_level?: string; next_supply_tick?: number | null };
+export type Tank = { id: string; name: string; region_id: string; status: string; demand_multiplier?: number; fuels: Record<Fuel, FuelState>; dispatch_used?: number; dispatch_capacity_per_tick?: number };
+export type Route = { id: string; source_depot_id: string; destination_station_id: string; transit_ticks: number; max_shipment: number; status: string };
+export type Region = { id: string; name: string; fuels: Record<Fuel, { demand_last_hour: number; normal_last_hour: number; forecast_12h: number }> };
+export type Network = {
+  run_id: string; tick?: number; tick_minutes?: number; sim_time?: string; sim_status?: string; mode: string; stale: boolean;
+  data_age_s: number | null; execution_blocked: boolean; reason: string; stream: string; autopilot: string; policy_version: string; history_gap: boolean;
+  stations: Tank[]; depots: Tank[]; routes: Route[]; regions: Region[];
+  kpis: { service_level?: number; unmet_liters?: number; in_transit_liters?: number; open_alerts?: number; pending_recommendations?: number };
+};
+export type Recommendation = {
+  id: string; status: string; station_id: string; fuel_type: Fuel; current_inventory: number; projected_stockout_hours: number | null; expected_demand_12h: number;
+  action: { source_depot_id: string; route_id: string; quantity: number; eta_tick: number };
+  impact: { risk_before: number; risk_after: number; unmet_before_l: number; unmet_after_l: number };
+  confidence: { score: number; level: string }; requires_review: boolean;
+  signals: string[]; constraints: string[]; alternatives: { label: string; risk_after: number }[];
+  explanation: string; explanation_source: string; policy_version: string; model_version: string;
+};
+export type Alert = { id: string; status: string; type: string; severity: string; entity_id: string; fuel_type?: Fuel; message: string; first_tick: number; last_tick: number; event_ids: number[] };
+export type Supply = { id: string; depot_id: string; fuel_type: Fuel; quantity: number; planned_tick: number; status: string };
+export type SimEvent = { id: number; type: string; start_tick: number; end_tick: number; status: string; parameters: Record<string, unknown> };
+export type Decision = { id: string; recommendation_id: string; run_id: string; status: string; actor: string; sim_id: number | null; failure_reason: string | null; created_at: string; request: { source_depot_id: string; destination_station_id: string; fuel_type: Fuel; quantity: number; route_id: string; idempotency_key: string } };
+export type Incident = { id: string; tick: number; text: string; source: string; severity: string };
+export type Health = { status: string; mode: string; version: string; git_sha: string; p95_latency_ms: number | null; error_rate: number | null; components: Record<string, { status: string; [key: string]: string | number | null }>; reason: string };
+export type Forecast = { start_tick: number; tick_minutes: number; mean: number[]; std: number[]; inventory_path: number[]; model_version: string; source: string; risk: number; hours_to_stockout: number | null; history: { tick: number; demand_liters: number; served_liters: number }[]; uncertainty_note: string };

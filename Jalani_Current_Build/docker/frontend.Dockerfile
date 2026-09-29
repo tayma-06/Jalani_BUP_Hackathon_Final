@@ -1,10 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /src
 COPY frontend/package.json frontend/package-lock.json ./
-# Optional build secret `extra_ca`; see backend.Dockerfile.
-RUN --mount=type=secret,id=extra_ca \
-    if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
-    npm ci
+RUN npm ci
 COPY frontend/ ./
 ARG APP_VERSION=dev
 ARG GIT_SHA=dev

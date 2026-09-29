@@ -1,6 +1,6 @@
 export type Fuel = 'DIESEL' | 'PETROL' | 'OCTANE';
 export const fuels: Fuel[] = ['DIESEL', 'PETROL', 'OCTANE'];
-export type Page = 'Overview' | 'Stations & depots' | 'Recommendations' | 'Alerts' | 'Supply & disruptions' | 'Forecasts' | 'Decision history' | 'System health' | 'Control room';
+export type Page = 'Overview' | 'Stations & depots' | 'Recommendations' | 'Alerts' | 'Supply & disruptions' | 'Forecasts' | 'Decision history' | 'System health' | 'Control room' | 'Assistant';
 export type Session = { access_token: string; role: 'viewer' | 'operator' | 'admin'; username: string };
 export type FuelState = { inventory: number; capacity: number; in_transit?: number; forecast_12h?: number; hours_to_stockout?: number | null; risk?: number; risk_level?: string; next_supply_tick?: number | null };
 export type Tank = { id: string; name: string; region_id: string; status: string; demand_multiplier?: number; fuels: Record<Fuel, FuelState>; dispatch_used?: number; dispatch_capacity_per_tick?: number };

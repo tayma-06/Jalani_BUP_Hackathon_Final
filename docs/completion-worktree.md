@@ -1,5 +1,12 @@
 # Advanced completion worktree
 
+## Workspace restored
+
+Advanced changes have been merged back into `D:\BUP_Hackathon_Final` on
+`feature/advanced-intelligence`. Use that original folder for editing and running
+the application. The separate worktree is retained only as a backup; the paths
+and isolation notes below describe the earlier implementation stage.
+
 Branch: `feature/advanced-completion`.
 Location: `.worktrees/advanced-completion` under the original checkout.
 The existing uncommitted advanced changes were copied into this worktree on

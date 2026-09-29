@@ -34,6 +34,7 @@ from app.intelligence.engine import (
     reevaluate_review,
     validate_batch,
 )
+from app.intelligence.ml import active_forecast as registry_forecast
 from app.policy_registry import active_version, supersede_stale_recommendations
 from app.policy_registry import history as policy_history
 from app.policy_registry import register as register_policy
@@ -70,6 +71,8 @@ class FuelService:
         self.autopilot = "advisory"
         self.policy = copy.deepcopy(POLICY)
         self.policy_name = "greedy_v1"
+        self.forecaster = None
+        self.forecaster_error = None
         self.recommendations = []
         self.alerts = []
         self.incidents = []
@@ -108,7 +111,8 @@ class FuelService:
         row = self.db.last_snapshot()
         if row and row.run_id == self.run_id:
             self.snapshot = Snapshot.model_validate(row.payload)
-            self.analysis = analyse(self.snapshot, self.config.monte_carlo_paths)
+            self.analysis = analyse(self.snapshot, self.config.monte_carlo_paths,
+                                    self.config.horizon_hours, self.active_forecaster())
             self.build_network()
         self.autopilot = self.db.setting("autopilot", {"mode": "advisory"})["mode"]
         with self.db.session() as session:
@@ -117,6 +121,25 @@ class FuelService:
         self.policy_name = configured.get("version", "greedy_v1")
         self.policy.update({k: v for k, v in configured.items() if k in self.policy})
         self.restored = True
+
+    def active_forecaster(self):
+        """The active trained model from the registry, validated, or None (fallback)."""
+        try:
+            with self.db.session() as session:
+                self.forecaster = registry_forecast(session)
+            self.forecaster_error = None
+        except SQLAlchemyError as exc:
+            self.forecaster_error = f"model registry unavailable: {type(exc).__name__}"
+            self.forecaster = None
+        if self.forecaster is not None:
+            self.event("model.active", model=self.forecaster.version)
+            held_out = [e["mae"] for e in self.forecaster.evaluation if e.get("mae") is not None]
+            if held_out:
+                metrics.forecast_mae.labels(f"ml-{self.forecaster.version}").set(
+                    sum(held_out) / len(held_out))
+        else:
+            metrics.forecast_mae.labels("profile_v1").set(0.0)
+        return self.forecaster
 
     async def refresh(self):
         async with self.lock:
@@ -202,7 +225,8 @@ class FuelService:
                                                payload=snapshot.model_dump(mode="json")))
                     self.last_saved_tick = snapshot.instance.tick
                 session.commit()
-            analysis = await asyncio.to_thread(analyse, snapshot, self.config.monte_carlo_paths, self.config.horizon_hours)
+            analysis = await asyncio.to_thread(analyse, snapshot, self.config.monte_carlo_paths,
+                                               self.config.horizon_hours, self.active_forecaster())
             unexplained = inventory_reconciliation(snapshot, None if reset else previous)
             new_alerts = detect(snapshot, analysis, None if reset else previous, unexplained)
             new_alerts.extend(self.drift.observe(snapshot))
@@ -635,8 +659,13 @@ class FuelService:
                     "simulator": {"status": "healthy" if not current["stale"] else "unhealthy",
                                   "data_age_s": current["data_age_s"],
                                   "circuit": "open" if self.client.open_until > time.monotonic() else "closed"},
-                    "prediction_service": {"status": "healthy", "model": "profile_v1", "kind": "local statistical forecast"},
+                    "prediction_service": {"status": "healthy",
+                                           "model": f"ml-{self.forecaster.version}" if self.forecaster else "profile_v1",
+                                           "kind": "trained ridge forecast" if self.forecaster else "local statistical forecast",
+                                           "registry_note": self.forecaster_error or None},
                     "decision_engine": {"status": "healthy" if self.safe() else "blocked", "policy": self.policy_name,
                                         "last_cycle_ms": self.last_cycle_ms},
                     "event_stream": {"status": "connected" if self.stream_connected else "polling"},
-                    "llm": {"status": "disabled", "explanations": "grounded templates"}}}
+                    "llm": {"status": "configured" if self.config.groq_api_key else "disabled",
+                            "provider": "groq", "model": self.config.groq_model,
+                            "explanations": "read-only assistant with template fallback"}}}

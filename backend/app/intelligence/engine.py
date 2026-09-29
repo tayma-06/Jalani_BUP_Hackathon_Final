@@ -87,9 +87,42 @@ def historical_multiplier(snapshot, station, tick):
     return station.demand_multiplier / current_events * historical_events
 
 
-def forecast(snapshot, station, fuel, hours=24):
+def normalized_history(snapshot, station, fuel):
+    """(row, baseline litres/hour) observations in chronological order, event-normalised.
+
+    Baseline demand divides reported litres by the demand event multiplier in force at
+    that tick, so a spike leaves a comparable hour-of-day baseline across history.
+    """
+    tick_minutes = snapshot.instance.tick_minutes
+    history = sorted((h for h in snapshot.history if h.station_id == station.id and h.fuel_type == fuel),
+                     key=lambda h: h.tick)
+    history = history[-int(14 * 24 * 60 / tick_minutes):]
+    observations = []
+    for row in history:
+        multiplier = row.demand_multiplier
+        if multiplier is None:
+            multiplier = historical_multiplier(snapshot, station, row.tick)
+        if multiplier > 0:
+            observations.append((row, row.demand_liters / multiplier))
+    return observations
+
+
+def forecast(snapshot, station, fuel, hours=24, forecaster=None):
     tick_minutes = snapshot.instance.tick_minutes
     count = max(1, int(hours * 60 / tick_minutes))
+    if forecaster is not None:
+        # A trained model replaces the statistical profile when it covers this pair.
+        baseline = forecaster.baseline(snapshot, station, fuel, count)
+        if baseline is not None:
+            mean, std = zip(*baseline) if baseline else ((), ())
+            observations = normalized_history(snapshot, station, fuel)
+            return {"mean": [round(float(m), 2) for m in mean],
+                    "std": [round(float(s), 2) for s in std],
+                    "model_version": f"ml-{forecaster.version}",
+                    "source": f"trained ridge forecast {forecaster.version}",
+                    "known": True, "history_rows": len(observations),
+                    "history": [{"tick": row.tick, "litres_per_hour": round(value, 2)}
+                                for row, value in observations[-96:]]}
     profile = PROFILES.get(station.demand_profile)
     region = next(r for r in snapshot.regions if r.id == station.region_id)
     history = sorted((h for h in snapshot.history if h.station_id == station.id and h.fuel_type == fuel),
@@ -168,12 +201,12 @@ def project(inventory, capacity, means, stds, arrivals, tick, tick_minutes, seed
             "risk_level": "CRITICAL" if risk > 0.8 else "HIGH" if risk >= 0.5 else "MEDIUM" if risk >= 0.2 else "LOW"}
 
 
-def analyse(snapshot: Snapshot, paths=300, horizon_hours=12):
+def analyse(snapshot: Snapshot, paths=300, horizon_hours=12, forecaster=None):
     result = {}
     horizon = max(1, int(horizon_hours * 60 / snapshot.instance.tick_minutes))
     for station in snapshot.stations:
         for fuel in FUELS:
-            prediction = forecast(snapshot, station, fuel)
+            prediction = forecast(snapshot, station, fuel, hours=max(24, horizon_hours), forecaster=forecaster)
             scheduled = inbound(snapshot, station.id, fuel)
             risk = project(station.inventory[fuel], station.capacity[fuel], prediction["mean"][:horizon],
                            prediction["std"][:horizon], scheduled, snapshot.instance.tick,

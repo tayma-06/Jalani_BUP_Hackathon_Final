@@ -3,15 +3,18 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, ArrowDownToLine, ArrowRight, Bell, Check, ChevronRight, CircleHelp, Clock3, Droplets, Fuel, Gauge, History, LayoutDashboard, LogOut, MapPin, Network as NetworkIcon, Play, RefreshCw, Settings2, ShieldCheck, Truck, Waves, X } from 'lucide-react';
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api, label, number, percent, readSession } from './api';
+import Assistant from './Assistant';
 import { fuels, type Alert, type Decision, type Forecast, type Health, type Incident, type Network, type Page, type Recommendation, type Session, type SimEvent, type Supply, type Tank, type Fuel as FuelType } from './types';
 
 const pages: { name: Page; icon: typeof Activity }[] = [
+  { name: 'Assistant', icon: CircleHelp },
   { name: 'Overview', icon: LayoutDashboard }, { name: 'Stations & depots', icon: NetworkIcon },
   { name: 'Recommendations', icon: Truck }, { name: 'Alerts', icon: Bell },
   { name: 'Supply & disruptions', icon: Waves }, { name: 'Forecasts', icon: Activity },
   { name: 'Decision history', icon: History }, { name: 'System health', icon: ShieldCheck }, { name: 'Control room', icon: Settings2 },
 ];
 const descriptions: Record<Page, string> = {
+  Assistant: 'Understand the evidence behind incidents and recommendations.',
   Overview: 'A clear view of the network. A better next decision.',
   'Stations & depots': 'Storage, demand and delivery commitments across every location.',
   Recommendations: 'Inspect the forecast. Review the impact. Approve the next move.',
@@ -78,7 +81,7 @@ export default function App() {
       {(stateQuery.isError || state?.mode !== 'NORMAL' || state?.stale) && <div className="status-banner" role="status"><Activity size={18} /><div><strong>{stateQuery.isError ? 'Connection interrupted — showing the last available data.' : state?.reason || 'Connecting to the simulator.'}</strong><span>Allocation execution is paused. Data age: {number(state?.data_age_s, 1)} seconds.</span></div></div>}
       <div className="page-content"><div className="page-heading"><div><div className="eyebrow">FUEL OPERATIONS / {String(pages.findIndex(x => x.name === page) + 1).padStart(2, '0')}</div><h1>{page === 'Overview' ? 'Network overview' : page}</h1><p>{descriptions[page]}</p></div><div className="heading-side"><Badge value={state?.mode || 'CONNECTING'} /><small>{state?.sim_time ? new Date(state.sim_time).toLocaleString('en-GB', { timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · sim UTC' : 'Awaiting simulator clock'}</small><span className="live-dot">{state?.stream === 'connected' ? 'Live stream + REST' : 'REST polling'} · {state?.autopilot || 'advisory'}</span></div></div>
         {notice && <div className="notice" role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={16} /></button></div>}
-        {!state?.stations.length && page !== 'System health' && page !== 'Control room' ? <Panel title="Waiting for the fuel network"><Empty>Start the official simulator and check System health. The dashboard will populate after the first valid REST refresh.</Empty><button className="button" onClick={() => setPage('System health')}>View system health <ArrowRight size={16} /></button></Panel> : <>
+        {!state?.stations.length && page !== 'System health' && page !== 'Control room' && page !== 'Assistant' ? <Panel title="Waiting for the fuel network"><Empty>Start the official simulator and check System health. The dashboard will populate after the first valid REST refresh.</Empty><button className="button" onClick={() => setPage('System health')}>View system health <ArrowRight size={16} /></button></Panel> : <>
           {page === 'Overview' && state && <Overview state={state} name={name} navigate={setPage} />}
           {page === 'Stations & depots' && state && <Stations state={state} />}
           {page === 'Recommendations' && <Recommendations state={state} name={name} canAct={canAct} blocked={blocked} action={action} />}
@@ -88,6 +91,7 @@ export default function App() {
           {page === 'Decision history' && <HistoryPage name={name} canAct={canAct} blocked={blocked} busy={busy} action={action} />}
           {page === 'System health' && <HealthPage health={healthQuery.data} state={state} />}
           {page === 'Control room' && <ControlRoom state={state} busy={busy} action={action} />}
+          {page === 'Assistant' && <Assistant state={state} />}
         </>}
         <footer><span>Jalani · Decisions with context.</span><span>v{healthQuery.data?.version || '0.1.0'} · {healthQuery.data?.git_sha?.slice(0, 8) || 'dev'} · All fuel values in litres</span></footer>
       </div>

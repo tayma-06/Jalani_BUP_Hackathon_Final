@@ -127,8 +127,32 @@ Phase 1 evidence: `backend/tests/test_advanced.py` (24 tests) — all pass; full
 
 Status: **Implemented and verified.**
 
-### Phase 2 — planned (ML forecasting + model registry)
+### Phase 2 — ML forecasting, model registry, drift detection, operations assistant
 
-Next phase: `backend/app/intelligence/ml.py`, `ModelVersion` registry wiring, training
-command driven by a disposable official-simulator instance, leak-safe evaluation, and
-`profile_v1` fallback when no trained model is available.
+Merged from `feature/advanced-completion` (merge `8806134`) plus the trained forecast work.
+
+- `backend/app/intelligence/ml.py`: trained per-(station, fuel) ridge regression over
+  calendar + lagged-history features. Chronological split — the last `eval_rows` ticks are
+  held out and never appear in training; lagged features are built only from strictly earlier
+  observations. Artifacts carry `checksum` (sha256 of canonical JSON), `feature_schema`,
+  `feature_schema_version`, `data_fingerprint` and `training_config`.
+- `engine.forecast(..., forecaster=)` uses a trained model when it covers the station+fuel and
+  otherwise falls back to `profile_v1`; `analyse(..., forecaster=)` threads it through.
+  `normalized_history` is now shared by both paths so the baseline series is identical.
+- `service.active_forecaster()` loads the active artifact from `model_versions` and **validates
+  checksum + schema before use**; a corrupt or incompatible artifact yields `None` and the
+  service silently keeps `profile_v1`. Health reports the real model name, never a hard-coded one.
+- API: `GET /api/models/forecast`, `POST /api/models/forecast/deploy` (admin, checksum enforced),
+  `GET /api/models/forecast/evaluations`.
+- `backend/app/intelligence/drift.py` + `test_drift.py`: windowed input-drift monitor.
+- `backend/app/assistant.py` + `test_assistant.py`: read-only grounded assistant with template
+  fallback; `POST /api/assistant`; config `GROQ_API_KEY` / `GROQ_MODEL` / `LLM_TIMEOUT_SECONDS`
+  (empty key = disabled, template explanations). No execution rights.
+- Frontend: `Assistant.tsx` + `Assistant.test.tsx` (16 vitest tests).
+
+Phase 2 evidence: `pytest backend/tests -q` **60 passed**; `tests_ci` `11 passed, 3 skipped`;
+`ruff check backend` clean; frontend `lint`, `typecheck`, `test:ci` (16 passed) and `build` pass.
+
+Status: **Implemented; official-simulator training run and environment verification pending.**
+
+### Phase 3 — planned (optimization + hybrid, agents, RL, streaming, Kubernetes, UI)

@@ -16,12 +16,15 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import metrics
+from app.assistant import AssistantRequest, OperationsAssistant
 from app.config import Settings, settings
-from app.db import Alert, Recommendation, audit
+from app.db import Alert, ForecastEvaluation, ModelVersion, Recommendation, audit
 from app.intelligence.engine import recommend
+from app.intelligence.ml import MLForecast, ModelError, deploy_model
 from app.service import FuelService
 from app.sim.client import SimError
 
@@ -92,6 +95,8 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
 
     app = FastAPI(title="Jalani · Fuel Supply Intelligence", version=config.app_version, lifespan=lifespan)
     app.state.service = service
+    assistant = OperationsAssistant(config)
+    app.state.assistant = assistant
     login_attempts = defaultdict(deque)
 
     @app.middleware("http")
@@ -303,6 +308,10 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
     async def incidents(claims=Depends(user)):
         return service.incidents
 
+    @app.post("/api/assistant")
+    async def explain(body: AssistantRequest, claims=Depends(user)):
+        return await assistant.explain(service, body)
+
     @app.get("/api/summary")
     async def summary(claims=Depends(user)):
         state = service.network()
@@ -357,6 +366,44 @@ def create_app(config: Settings = settings, service: FuelService | None = None):
             if not str(body.get("reason") or "").strip():
                 raise HTTPException(422, "A rollback needs a recorded reason")
             return service.rollback_policy(claims["sub"], str(body["reason"])[:300], body.get("to_version"))
+
+    @app.get("/api/models/forecast")
+    async def forecast_models(claims=Depends(user)):
+        with service.db.session() as session:
+            rows = session.scalars(select(ModelVersion).order_by(ModelVersion.activated_at.desc()))
+            return {"active": service.forecaster.version if service.forecaster else None,
+                    "fallback": "profile_v1" if not service.forecaster else None,
+                    "models": [{"version": r.version, "checksum": r.checksum, "active": r.active,
+                                "previous_version": r.previous_version, "actor": r.actor, "reason": r.reason,
+                                "data_fingerprint": r.data_fingerprint,
+                                "feature_schema": r.feature_schema,
+                                "training_config": r.training_config,
+                                "evaluation": r.evaluation,
+                                "activated_at": r.activated_at} for r in rows]}
+
+    @app.post("/api/models/forecast/deploy")
+    async def deploy_forecast(body: dict, request: Request, claims=Depends(admin)):
+        artifact = body.get("artifact") if isinstance(body.get("artifact"), dict) else body
+        try:
+            forecaster = MLForecast(artifact)
+        except ModelError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        with service.db.session() as session:
+            result = deploy_model(session, artifact, claims["sub"], (await _reason(request)) or "deploy")
+        service.forecaster = forecaster
+        service.dirty.set()
+        return result
+
+    @app.get("/api/models/forecast/evaluations")
+    async def forecast_evaluations(station_id: str | None = None, limit: int = 100, claims=Depends(operator)):
+        with service.db.session() as session:
+            query = select(ForecastEvaluation).order_by(ForecastEvaluation.target_tick.desc()).limit(min(limit, 500))
+            if station_id:
+                query = query.where(ForecastEvaluation.station_id == station_id)
+            return [{"station_id": r.station_id, "fuel_type": r.fuel_type, "target_tick": r.target_tick,
+                     "issued_at_tick": r.issued_at_tick, "horizon": r.horizon, "model_version": r.model_version,
+                     "predicted": r.predicted, "lower": r.lower, "upper": r.upper, "observed": r.observed}
+                    for r in session.scalars(query)]
 
     async def control(path, payload, claims):
         async with service.lock:

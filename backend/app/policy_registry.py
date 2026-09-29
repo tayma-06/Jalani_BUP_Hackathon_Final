@@ -33,7 +33,8 @@ def active_version(session: Session) -> PolicyVersion | None:
 
 
 def history(session: Session, limit: int = 50) -> list[dict]:
-    rows = session.scalars(select(PolicyVersion).order_by(PolicyVersion.activated_at.desc()).limit(limit))
+    rows = session.scalars(select(PolicyVersion).order_by(
+        PolicyVersion.activated_at.desc(), PolicyVersion.active.desc(), PolicyVersion.version).limit(limit))
     return [row_json(row) for row in rows]
 
 

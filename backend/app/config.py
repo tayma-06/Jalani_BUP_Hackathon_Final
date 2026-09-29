@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     chaos_enabled: bool = False
     background_enabled: bool = True
     stream_enabled: bool = True
-    llm_api_key: str = ""
-    ml_service_url: str = ""
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-20b"
+    llm_timeout_seconds: float = Field(default=12, ge=1, le=30)
 
 
 settings = Settings()

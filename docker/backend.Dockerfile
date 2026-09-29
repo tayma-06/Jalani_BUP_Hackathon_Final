@@ -20,7 +20,8 @@ COPY --from=dependencies /wheels /wheels
 COPY backend/requirements.lock .
 RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.lock \
     && rm -rf /wheels && useradd --uid 10001 --create-home appuser
-COPY --chown=appuser:appuser backend/ /app/
+COPY --chown=appuser:appuser backend/app/ /app/app/
+COPY --chown=appuser:appuser backend/config/ /app/config/
 USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \

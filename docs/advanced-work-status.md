@@ -156,3 +156,30 @@ Phase 2 evidence: `pytest backend/tests -q` **60 passed**; `tests_ci` `11 passed
 Status: **Implemented; official-simulator training run and environment verification pending.**
 
 ### Phase 3 — planned (optimization + hybrid, agents, RL, streaming, Kubernetes, UI)
+
+## 4. Advanced feature status (as of `d39a197`)
+
+Branch `feature/advanced-intelligence`. All results below come from this workspace; nothing is
+inherited from a run that was not executed here.
+
+| # | Feature | Status | Files | Verification command | Result |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Uncertainty-aware allocation | Implemented and verified | `engine.project` | `pytest backend/tests -q` | 60 passed |
+| 2 | Counterfactual independence | Implemented and verified | `engine.recommend` | `pytest -k shown_benefit` | passed |
+| 3 | Incident detection + event scoping | Implemented and verified | `engine.detect`, `scoped_event_ids` | `pytest -k scoped` | passed |
+| 4 | Versioned policy registry + rollback | Implemented and verified | `policy_registry.py` | `pytest -k registry or rollback` | passed |
+| 5 | Event-driven updates (SSE) | Implemented and verified (unchanged by this branch) | `service.stream` | `pytest backend/tests -q` | 60 passed |
+| 6 | Trained ML forecast + model registry | Implemented; training run pending | `intelligence/ml.py` | `pytest -q`; `/api/models/forecast` | 60 passed; **no official-simulator training run has been executed** |
+| 7 | Constrained optimization policy | Not implemented | - | - | Only `greedy_v1` / `naive_reorder` / `do_nothing` exist |
+| 8 | Drift detection | Implemented; environment verification pending | `intelligence/drift.py` | `pytest backend/tests/test_drift.py` | passes on fixtures only; no live drift run |
+| 9 | Grounded operations assistant | Implemented; not approved for operation | `assistant.py` | `pytest backend/tests/test_assistant.py` | passes; disabled unless `GROQ_API_KEY` set |
+| 10 | Multi-agent coordination | Not implemented | - | - | Single inline pipeline remains |
+| 11 | Experimental RL policy | Not implemented | - | - | No adapter, no checkpoints |
+| 12 | Application event stream | Not implemented (SSE consume only) | - | - | Backend publishes no operator stream |
+| 13 | Kubernetes + safe autoscaling | Not implemented | - | - | Compose only; no cluster available |
+
+**Nothing in this table is a production claim.** Feature 6 is the one with genuinely missing
+evidence: the trained artifact format, model registry, leak-safe chronological split and
+checksum enforcement are implemented and unit-tested, but the training command has not been
+run against a disposable official-simulator instance, so **no accuracy numbers are reported**.
+The branch is pushed nowhere; commits `bceeb5f`, `8806134` (merge) and `d39a197` are local.

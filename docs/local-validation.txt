@@ -1,0 +1,22 @@
+test_disrupted_route_never_chosen (test_checks.CandidateTests.test_disrupted_route_never_chosen) ... ok
+test_test_shipment_respects_smallest_headroom (test_checks.CandidateTests.test_test_shipment_respects_smallest_headroom) ... ok
+test_bad_sha_and_version_rejected (test_checks.ManifestTests.test_bad_sha_and_version_rejected) ... ok
+test_matching_baked_revision_passes (test_checks.ManifestTests.test_matching_baked_revision_passes) ... ok
+test_mutable_tag_and_env_injection_rejected (test_checks.ManifestTests.test_mutable_tag_and_env_injection_rejected) ... ok
+test_pair_and_sha_are_preserved (test_checks.ManifestTests.test_pair_and_sha_are_preserved) ... ok
+test_wrong_baked_revision_fails (test_checks.ManifestTests.test_wrong_baked_revision_fails) ... ok
+test_both_error_envelopes (test_checks.SmokeTests.test_both_error_envelopes) ... ok
+test_no_recommendations_can_be_a_healthy_world (test_checks.SmokeTests.test_no_recommendations_can_be_a_healthy_world) ... ok
+test_stale_200_response_fails_deploy (test_checks.SmokeTests.test_stale_200_response_fails_deploy) ... ok
+test_wrong_release_fails_even_when_http_is_200 (test_checks.SmokeTests.test_wrong_release_fails_even_when_http_is_200) ... ok
+test_failed_candidate_restores_previous_but_exits_failed (test_deployment.DeploymentTests.test_failed_candidate_restores_previous_but_exits_failed) ... ok
+test_mutable_manifest_fails_before_docker_mutation (test_deployment.DeploymentTests.test_mutable_manifest_fails_before_docker_mutation) ... ok
+test_success_promotes_only_after_checks_and_keeps_previous (test_deployment.DeploymentTests.test_success_promotes_only_after_checks_and_keeps_previous) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.543s
+
+OK
+
+PASS: all Python/YAML/JSON/Bash/k6 syntax, workflow shell syntax, release dependencies and fail-closed missing-app preflight.
+Counts: 11 Python; 8 YAML; 9 Markdown
